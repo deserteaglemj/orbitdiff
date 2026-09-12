@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible OrbitDiff defect
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report public-safe, synthetic details only. Do not include credentials, saved-session material, browser data, private profile information, or personal identifiers.
+  - type: input
+    id: version
+    attributes:
+      label: OrbitDiff version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      placeholder: Commands and synthetic target names
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

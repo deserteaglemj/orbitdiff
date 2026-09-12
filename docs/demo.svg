@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-label="OrbitDiff synthetic terminal demo">
+  <rect width="960" height="360" rx="18" fill="#10131a"/>
+  <circle cx="40" cy="35" r="8" fill="#ff605c"/><circle cx="66" cy="35" r="8" fill="#ffbd44"/><circle cx="92" cy="35" r="8" fill="#00ca4e"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20" fill="#e6edf3">
+    <text x="42" y="90" fill="#7ee787">$ orbitdiff demo</text>
+    <text x="42" y="135">baseline stored</text>
+    <text x="42" y="180">pending changes observed</text>
+    <text x="42" y="225" fill="#ffbd44">following_stopped nova_labs (200)</text>
+    <text x="42" y="270" fill="#7ee787">following_started ember_lab (300)</text>
+    <text x="42" y="315" fill="#8b949e">synthetic data only. no network. no credentials.</text>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 128" role="img" aria-label="OrbitDiff wordmark">
+  <rect width="480" height="128" rx="24" fill="#111827"/>
+  <circle cx="64" cy="64" r="31" fill="none" stroke="#60a5fa" stroke-width="9"/>
+  <circle cx="88" cy="48" r="8" fill="#fbbf24"/>
+  <text x="126" y="79" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="48" font-weight="700">OrbitDiff</text>
+</svg>
