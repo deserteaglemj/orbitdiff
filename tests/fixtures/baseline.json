@@ -1,0 +1,9 @@
+{
+  "target": "atlas_studio",
+  "reported_count": 2,
+  "complete": true,
+  "accounts": [
+    {"profile_id": "100", "username": "pixel_forge"},
+    {"profile_id": "200", "username": "nova_labs"}
+  ]
+}

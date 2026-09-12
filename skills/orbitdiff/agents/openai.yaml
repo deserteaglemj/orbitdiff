@@ -1,0 +1,5 @@
+interface:
+  display_name: "OrbitDiff"
+  short_description: "Confirm public following-list changes locally"
+  icon: "../assets/orbitdiff-mark.svg"
+  default_prompt: "Use OrbitDiff to safely inspect confirmed changes for a public target. Start with the offline demo and never request credentials."

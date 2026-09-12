@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=75,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbitdiff"
+version = "0.1.1"
+description = "Local-first confirmed diffs for public Instagram following lists"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "OrbitDiff contributors"}]
+classifiers = [
+  "Development Status :: 4 - Beta",
+
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "instaloader>=4.15.3,<5",
+  "platformdirs>=4.3,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2,<2",
+  "mypy>=1.13,<2",
+  "pytest>=8,<10",
+  "ruff>=0.8,<1",
+]
+
+[project.scripts]
+orbitdiff = "orbitdiff.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+orbitdiff = ["fixtures/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]

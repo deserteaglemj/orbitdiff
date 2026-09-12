@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a focused improvement within OrbitDiff's public-only scope
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        OrbitDiff does not accept requests for private-profile access, account actions, password handling, cloud sync, content collection, or identity enrichment.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the public-data workflow problem using synthetic examples.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
