@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1c2622">
+    <meta name="description" content="Your local, read-only workspace for Instagram relationship data.">
+    <title>Orbit OS | Personal relationship intelligence</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Workspace navigation">
+        <a class="brand" href="#overview" aria-label="Orbit OS overview">
+          <img src="/icon.svg" alt="" width="38" height="38">
+          <span>orbit<span class="brand-os">os</span></span>
+        </a>
+        <div class="workspace-label"><span class="workspace-dot"></span> Personal workspace</div>
+        <nav class="navigation" aria-label="Main navigation">
+          <a href="#overview" data-view="overview" aria-current="page"><span class="nav-icon" data-icon="overview"></span>Overview</a>
+          <a href="#relationships" data-view="relationships"><span class="nav-icon" data-icon="relationships"></span>Relationships<span id="relationship-nav-count" class="nav-count"></span></a>
+          <a href="#watchlist" data-view="watchlist"><span class="nav-icon" data-icon="watchlist"></span>Watchlist<span id="watchlist-nav-count" class="nav-count"></span></a>
+          <a href="#activity" data-view="activity"><span class="nav-icon" data-icon="activity"></span>Activity</a>
+          <a href="#system" data-view="system"><span class="nav-icon" data-icon="system"></span>System<span id="system-dot" class="system-dot" hidden></span></a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="privacy-note"><span data-icon="lock"></span><span>Local by design<small>Your data stays on this device.</small></span></div>
+          <div id="sidebar-profile" class="sidebar-profile"><span class="profile-orbit">o</span><span>Personal workspace<small>Read-only connection</small></span></div>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="breadcrumb"><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><strong id="current-view">Overview</strong></div>
+          <div class="topbar-actions"><span class="local-indicator"><span></span>Local only</span><button id="refresh-data" class="button button-light" type="button"><span data-icon="refresh"></span><span class="refresh-label">Refresh data</span></button></div>
+        </header>
+        <div id="app-notice" class="app-notice" role="status" hidden></div>
+        <main id="main-content" tabindex="-1" aria-busy="true">
+          <div class="loading-state" role="status"><span class="loading-orbit"></span><h1>Opening your workspace</h1><p>Reading local relationship data.</p><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        </main>
+        <footer class="workspace-footer"><span>Orbit OS <span class="footer-divider">/</span> Personal relationship intelligence</span><span id="footer-updated">Read-only. Private to this device.</span></footer>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <noscript><p class="noscript">Enable JavaScript to view your local relationship workspace.</p></noscript>
+  </body>
+</html>

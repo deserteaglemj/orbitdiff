@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -29,8 +30,9 @@ def test_public_safety_scan_accepts_clean_public_text(tmp_path: Path) -> None:
 
 def test_public_safety_scan_rejects_sensitive_files_and_generic_secret_shapes(tmp_path: Path) -> None:
     cases = {
-        ".env": "CONFIG=value\n",
         "orbitdiff.sqlite3": "SQLite format 3\x00",
+        "orbitdiff.sqlite3-wal": "Synthetic write-ahead log",
+        "orbitdiff.sqlite3-shm": "Synthetic shared-memory index",
         "session-analyst": "opaque material",
         "paths.md": "/" + "Users" + "/example/private.txt\n",
         "key.pem": "-----BEGIN " + "PRIVATE KEY-----\n",
@@ -47,3 +49,24 @@ def test_public_safety_scan_rejects_sensitive_files_and_generic_secret_shapes(tm
     for expected in ("sensitive filename", "absolute home path", "private key", "github", "telegram", "high entropy"):
         assert expected in result.stdout.lower()
     assert "private.txt" in result.stdout
+    assert "sensitive filename: orbitdiff.sqlite3-wal" in result.stdout
+    assert "sensitive filename: orbitdiff.sqlite3-shm" in result.stdout
+
+
+def test_sensitive_environment_names_are_rejected_without_opening_them() -> None:
+    module = runpy.run_path(str(SCANNER))
+    pattern = module["SENSITIVE_NAME"]
+    assert pattern.search(".env")
+    assert pattern.search(".env.local")
+
+
+def test_private_local_receipts_are_not_release_candidates(tmp_path: Path) -> None:
+    for dirname in (".remember", ".orbit-local"):
+        directory = tmp_path / dirname
+        directory.mkdir()
+        (directory / "private.txt").write_text("CONFIDENTIAL_LOCAL_ONLY")
+    cache_dir = tmp_path / ".impeccable"
+    cache_dir.mkdir()
+    (cache_dir / "hook.cache.json").write_text("CONFIDENTIAL_LOCAL_ONLY")
+    result = run_scan(tmp_path, "--forbid", "CONFIDENTIAL_LOCAL_ONLY")
+    assert result.returncode == 0

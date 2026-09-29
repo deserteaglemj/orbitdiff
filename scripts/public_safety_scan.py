@@ -14,6 +14,8 @@ TEXT_PATTERNS = (
 )
 SKIP_DIRECTORIES = {
     ".git",
+    ".remember",
+    ".orbit-local",
     ".superpowers",
     ".pytest_cache",
     ".mypy_cache",
@@ -25,8 +27,12 @@ SKIP_DIRECTORIES = {
     "build",
     "dist",
 }
-SENSITIVE_NAME = re.compile(r"(^\.env(?:\.|$)|session[-_.]|\.(?:db|sqlite|sqlite3)$)", re.IGNORECASE)
+SENSITIVE_NAME = re.compile(
+    r"(^\.env(?:\.|$)|session[-_.]|\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm|journal))?$)",
+    re.IGNORECASE,
+)
 TOKEN = re.compile(r"[A-Za-z0-9_+=-]{40,}")
+LOCAL_CACHE_FILES = {Path(".impeccable/hook.cache.json")}
 
 
 def entropy(value: str) -> float:
@@ -40,6 +46,7 @@ def candidate_files(root: Path) -> list[Path]:
         path
         for path in root.rglob("*")
         if path.is_file()
+        and path.relative_to(root) not in LOCAL_CACHE_FILES
         and not any(
             part in SKIP_DIRECTORIES or part.endswith(".egg-info")
             for part in path.relative_to(root).parts
@@ -53,6 +60,7 @@ def scan(root: Path, forbidden: list[str]) -> list[str]:
         relative = path.relative_to(root)
         if SENSITIVE_NAME.search(path.name):
             findings.append(f"sensitive filename: {relative}")
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:

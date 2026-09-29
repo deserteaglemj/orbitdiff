@@ -12,3 +12,11 @@ dist/
 .env.*
 *.sqlite3
 *.sqlite3-*
+.remember/
+.orbit-local/
+.impeccable/hook.cache.json
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.DS_Store

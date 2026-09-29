@@ -16,7 +16,10 @@ TEXT_PATTERNS = (
     ("github credential", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b")),
     ("telegram credential", re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}\b")),
 )
-SENSITIVE_NAME = re.compile(r"(^\.env(?:\.|$)|session[-_.]|\.(?:db|sqlite|sqlite3)$)", re.IGNORECASE)
+SENSITIVE_NAME = re.compile(
+    r"(^\.env(?:\.|$)|session[-_.]|\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm|journal))?$)",
+    re.IGNORECASE,
+)
 TOKEN = re.compile(r"[A-Za-z0-9_+=-]{40,}")
 
 
