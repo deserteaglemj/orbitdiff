@@ -1,4 +1,42 @@
-# OrbitDiff
+# Orbit OS
+
+**A private workspace for understanding your Instagram relationships.**
+
+Orbit OS turns existing daily tracking into an interactive local app. Browse your own followers and following, see confirmed changes, search relationships, inspect the accounts you watch, and check the health of every collection source.
+
+The personal graph and other-account following trackers stay separate. Profile follower counts are not presented as a complete named-follower roster. Hidden lists, pending changes, missing sources, stale data, and collection errors are explicit.
+
+## Open the app
+
+Python 3.11 or later is the only app runtime requirement. No install, API key, cloud account, or package download is needed for the local workspace:
+
+```bash
+PYTHONPATH=src python3 -m orbit_os --open
+```
+
+On macOS, double-click **Orbit OS.app** or **Orbit OS.command** in this checkout. The launcher opens a terminal and your browser. Leave that terminal running while using the app, and press Ctrl+C to stop it. A second launch reopens the running app.
+
+The default address is `http://127.0.0.1:8767`. It is available only on this computer. This is a local browser app with a macOS launcher, not a hosted service or a native macOS client.
+
+Already installed the Python package? Use `orbit-os --open`. To inspect a separate collection home, use `--hermes-home PATH`. A different port can be selected with `--port 8768`.
+
+## Your workspace
+
+- **Overview:** profile counts, confirmed mutuals, relationship coverage, follower history, and recent changes.
+- **Relationships:** search and filter known relationships, including confirmed nonreciprocal relationships and unknown reciprocal status.
+- **Watchlist:** each watched account's observed following list, confirmed changes, pending observations, and list visibility.
+- **Activity:** a searchable timeline with source and date filters. Unattributed follower movement stays anonymous.
+- **System:** collection attempts, last successful data, existing schedules, coverage, and recovery guidance.
+
+**Refresh data** rereads existing local artifacts. It does not contact Instagram or run a collector. Existing Hermes schedules continue to own collection. Orbit OS adds no scheduled task, background daemon, notifications, account actions, or paid API usage.
+
+The app automatically reads the personal graph and following-watch artifacts in the local Hermes home. If they are missing, it shows the setup state. There are no sample accounts mixed into live views. See [the architecture and data contract](docs/orbit-os.md) for sources, privacy, and operating details.
+
+Personal artifacts remain outside the checkout. The app reads a verified private snapshot of the personal SQLite database, leaving the source files untouched. It never stores credentials, browser data, or API response bodies. It has no analytics and loads no remote fonts, avatars, or scripts. CSV exports are created only when requested in the interface.
+
+## OrbitDiff collection CLI
+
+Orbit OS is built on the [OrbitDiff repository](https://github.com/deserteaglemj/orbitdiff). The existing public-list collection CLI and portable skill remain available. The workspace app is an additional local interface; the following installation instructions refer to the published OrbitDiff CLI release.
 
 **Track who enters and leaves any public Instagram orbit.**
 

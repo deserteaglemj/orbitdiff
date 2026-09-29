@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orbitdiff"
 version = "0.1.1"
-description = "Local-first confirmed diffs for public Instagram following lists"
+description = "Orbit OS local relationship workspace with the OrbitDiff public-list CLI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -35,12 +35,14 @@ dev = [
 
 [project.scripts]
 orbitdiff = "orbitdiff.cli:main"
+orbit-os = "orbit_os.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 orbitdiff = ["fixtures/*.json"]
+orbit_os = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/*.webmanifest"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
