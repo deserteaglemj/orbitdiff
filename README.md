@@ -1,29 +1,42 @@
 # OrbitDiff
 
-**Understand your Instagram followers and following, locally.**
+**Who did they follow?**
 
-Give your AI agent a supplied Instagram export and ask who appears in it, which relationships are mutual, and what changed between snapshots. OrbitDiff also supports a separate workflow for observing changes in other accounts' public following lists.
+Curious whether your crush or partner started following someone new on Instagram? OrbitDiff helps your AI agent compare someone's **public following list** over time and show which accounts appeared or disappeared.
 
-The **Agent Skill** supplies instructions. The separately installed **runtime** supplies commands. **Orbit OS** is the local app that uses the same workspace.
+See the public handle, when a change was first observed, and when a later observation confirmed it. Those dates describe what OrbitDiff observed, not the exact moment someone tapped Follow. A follow alone does not explain why.
 
 **[Try the offline demo with your agent](docs/prompt.md)**
 
-Start with synthetic data. No Instagram login or personal export is needed for the demo.
+Start with synthetic data. No Instagram login or personal export is needed. **Developer preview:** live collection remains Unproven under the [release criteria](docs/release-readiness.md). After a baseline, public changes need **two matching complete observations** to be confirmed. Installation and demos do not prove live tracking.
 
-![Illustration of the synthetic public-following demo: a baseline, pending changes, then following_started and following_stopped events. No live collection is shown.](docs/demo.svg)
+![OrbitDiff: Who did they follow? Synthetic graph and example for pixel_forge, first observed September 29 at 09:00 UTC and confirmed September 30 at 09:00 UTC. Confirmation needs two matching complete observations. Offline developer preview.](docs/social-preview.jpg)
 
-*Illustration of the public-following demo. The shared `orbit-os demo` also includes personal export observations. These examples do not establish live tracking readiness.*
+*Synthetic illustration created with ChatGPT Image, not an app screenshot or live result.*
 
-## What you can learn
+## From a following list to a clear change
 
-| Your task | Input | Result and its limits |
-| --- | --- | --- |
-| Understand your own followers and following | Your supplied Instagram relationship export, JSON folder or ZIP | Mutuals, unknown reciprocity, and differences between supplied snapshots. Export observations are not live-confirmed events. Refresh with another export. |
-| Observe another account's public following | An explicitly requested public scan with your human-created local session | A silent starting baseline, pending differences, and confirmation after two matching complete observations of the same relationship change. |
+1. **Start with a baseline.** The first complete observation saves the starting list. It creates no follow events and cannot recover earlier history.
+2. **Notice a difference.** A later complete observation finds an addition or removal. The change stays pending.
+3. **Confirm what persisted.** Another complete observation must agree on that same relationship change. Failed or incomplete scans preserve the last good evidence.
 
-Missing data stays unknown. Failed or incomplete scans preserve the last good evidence. Public collection covers **following lists**, not other accounts' followers, private profiles, posts, or messages.
+For example, `pixel_forge` is absent from the baseline, appears on September 29, and is still present in the next complete observation on September 30. The report records September 29 as first observed and September 30 as confirmed. It does not establish when the Follow action happened. Brief changes between scans can go unseen.
+
+## Ask your agent what changed
+
+Once you have stored observations, give your agent a request like this:
+
+> Show changes in `atlas_studio`'s stored public following list. Which accounts appeared or disappeared? Include first-observed and confirmed dates, separate pending changes, and explain anything unknown. Use my selected workspace without collecting new data.
+
+**Who is the new account?** Results identify its public handle and account ID. The local app links to the observed profile. OrbitDiff does not establish the person behind it, their gender, relationship status, or motives.
+
+**Can my agent check daily?** After the manual live workflow is verified, an explicitly requested schedule can use your agent host's supported scheduler. Live scans need a public target and a human-created local login session. Setup installs no recurring job. [Scheduling prerequisites](skills/orbitdiff/references/scheduling.md).
+
+Public collection covers **following lists**. Other accounts' followers, private profiles, posts, and messages are outside this workflow. [Public scan setup and limits](skills/orbitdiff/SKILL.md#public-watchlists).
 
 ## Start with the Agent Skill
+
+The **Agent Skill** supplies instructions. The separately installed **runtime** supplies commands. **Orbit OS** is the local app that uses the same workspace.
 
 Use a local agent with file access and command execution. A chat-only assistant cannot run the tool on your computer.
 
@@ -58,17 +71,15 @@ Without pipx or skill-install support, use the [verified archive and isolated-en
 
 These commands select the published **v0.2.2 developer preview**. Main-branch documentation and skill improvements can be newer than that release. [Installation evidence](docs/skill-installation-verification.md) separates the published artifacts, local candidates, and host tests. Codex, Claude Code, and Cursor file placement has been checked; fresh host discovery and task execution remain Unproven. Other hosts need their own verification.
 
-## After the demo
+## Also: understand your own followers and following
 
-Ask your agent to do one task, using your own account handle and selected paths:
+Import your supplied Instagram relationship export to see mutuals, unknown reciprocity, and differences between snapshots. This is a separate offline workflow: **export observations are not live-confirmed events**. Refresh it with another export.
+
+After the demo, use your own account handle and selected paths:
 
 > Import my supplied JSON export for `atlas_studio` into my selected workspace. I have not declared either direction complete. Show the relationships and explain what remains unknown.
 
-For an existing workspace:
-
-> Show my stored relationships and changes, including source dates and coverage. Do not collect new data.
-
-Keep exports and session material local. OrbitDiff has no cloud account or telemetry; your AI host's handling of files and command output follows that host's own settings. Personal imports, stored reports, app refresh, and demos do not contact Instagram. Live public collection requires a separate human login and explicit request; [read its boundaries first](skills/orbitdiff/SKILL.md#public-watchlists). No automatic daily schedule is installed.
+Keep exports and session material local. OrbitDiff has no cloud account or telemetry; your AI host's handling of files and command output follows that host's own settings. Personal imports, stored reports, app refresh, and demos do not contact Instagram.
 
 ## Prefer the desktop app?
 
@@ -81,7 +92,5 @@ The separate **Orbit OS.app** bundles the interface and runtime, without requiri
 - **Existing OrbitDiff data:** retain the same explicit path as `--workspace PATH` for `orbit-os` and `--data-dir PATH` for `orbitdiff`; their default directories differ. [Command reference](skills/orbitdiff/references/commands.md).
 - **Questions or reproducible problems:** [GitHub Issues](https://github.com/deserteaglemj/orbitdiff/issues). Share synthetic examples and versions. Use the [private reporting guidance](SECURITY.md) for vulnerabilities.
 - **Contribute:** [development setup](CONTRIBUTING.md), [release checks](docs/release-checklist.md), and [readiness criteria](docs/release-readiness.md).
-
-Live public collection remains Unproven under the release criteria. Installation and offline demos do not prove live tracking.
 
 MIT licensed. [LICENSE](LICENSE). OrbitDiff and Orbit OS are not affiliated with Instagram or Meta.
