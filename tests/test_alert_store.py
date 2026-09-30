@@ -77,6 +77,7 @@ def test_window_claim_survives_restart_and_concurrent_triggers(tmp_path):
         claims = list(pool.map(attempt, range(2)))
     assert sum(c is not None for c in claims) == 1
     assert store.claim_window(job_id, now=START + timedelta(hours=2)) is None
+    assert store.jobs(now=START + timedelta(hours=2))[0]['runs'][0]['state'] == 'interrupted'
     assert store.claim_window(job_id, now=START - timedelta(days=1)) is None
 
 
@@ -125,3 +126,23 @@ def test_invalid_runtime_and_protected_reference_are_rejected(tmp_path):
             store.configure('atlas_studio', login='orbit_demo', runtime=runtime,
                             session_file=session, time='09:00', timezone='UTC', now=START)
     assert not store.path.exists()
+
+
+def test_paused_job_can_change_runtime_reference_without_erasing_history(tmp_path):
+    store, job_id = configured(tmp_path)
+    store.pause(job_id)
+    store.update(job_id,time='09:00',timezone='UTC',now=START,
+                  runtime=Path('/usr/bin/false'),login='orbit_demo_two',session_file=tmp_path/'new-session')
+    assert store.job(job_id)['runtime'] == '/usr/bin/false'
+    assert store.job(job_id)['login'] == 'orbit_demo_two'
+    assert store.status('atlas_studio')['confirmed_count'] == 1
+    assert store.job(job_id)['host_job_id'] is None
+
+
+def test_status_shows_unclaimed_due_window_instead_of_tomorrow(tmp_path):
+    store,job_id=configured(tmp_path)
+    view=store.jobs(now=START+timedelta(hours=2))[0]
+    assert view['next_due_at']=='2026-10-01T09:00:00+00:00'
+    assert view['due_now'] is True
+    store.claim_window(job_id,now=START+timedelta(hours=2))
+    assert store.jobs(now=START+timedelta(hours=2))[0]['next_due_at']=='2026-10-02T09:00:00+00:00'

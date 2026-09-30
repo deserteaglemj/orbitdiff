@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from .alert_outbox import OutboxStore
@@ -48,14 +49,19 @@ class MacOSSender:
 
 def dispatch(store: OutboxStore, job_id: str, sender: Sender, *, now: datetime) -> list[dict[str, Any]]:
     results = []
+    started = time.monotonic()
     for _ in range(20):
-        notice = store.claim_notice(job_id, now=now, idempotent=sender.idempotent)
+        current = now + timedelta(seconds=time.monotonic()-started)
+        notice = store.claim_notice(job_id, now=current, idempotent=sender.idempotent)
         if notice is None:
             break
         try:
             result = sender.send(notice["payload"], notice["key"])
         except Exception:
             result = DeliveryResult("uncertain", "submission_uncertain")
-        store.finish_notice(notice["id"], notice["lease_token"], state=result.state, detail=result.detail, now=now)
+        current = now + timedelta(seconds=time.monotonic()-started)
+        recorded = store.finish_notice(notice["id"], notice["lease_token"], state=result.state, detail=result.detail, now=current)
+        if not recorded:
+            result = DeliveryResult("uncertain", "submission_uncertain")
         results.append({"notice_id": notice["id"], "state": result.state, "detail": result.detail})
     return results

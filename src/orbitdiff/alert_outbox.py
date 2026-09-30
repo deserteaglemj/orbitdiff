@@ -62,6 +62,7 @@ class OutboxStore(AlertStore):
                 for statement in _SCHEMA.split(";"):
                     if statement.strip():
                         conn.execute(statement)
+                conn.execute("INSERT OR IGNORE INTO schema_meta VALUES (3)")
 
     def _on_enable(self, conn: sqlite3.Connection, job: dict[str, Any], now: datetime) -> None:
         if conn.execute("SELECT 1 FROM alert_subscriptions WHERE job_id=? AND active=1", (job["id"],)).fetchone():
@@ -183,7 +184,7 @@ class OutboxStore(AlertStore):
                              (token,row["id"],current.isoformat()))
                 return dict(conn.execute("SELECT * FROM alert_notices WHERE id=?", (row["id"],)).fetchone())
 
-    def finish_notice(self, notice_id: str, token: str, *, state: str, detail: str, now: datetime) -> None:
+    def finish_notice(self, notice_id: str, token: str, *, state: str, detail: str, now: datetime) -> bool:
         if state not in {"accepted", "failed", "uncertain"}:
             raise ValueError("invalid submission result")
         current = aware(now)
@@ -192,7 +193,7 @@ class OutboxStore(AlertStore):
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute("SELECT * FROM alert_notices WHERE id=? AND lease_token=? AND state='sending'", (notice_id,token)).fetchone()
                 if row is None:
-                    return
+                    return False
                 conn.execute("UPDATE alert_notices SET state=?,detail=?,next_attempt=? WHERE id=?",
                              (state,detail,(current+timedelta(minutes=30)).isoformat(),notice_id))
                 conn.execute("UPDATE alert_delivery_attempts SET state=?,detail=?,finished_at=? WHERE token=?",
@@ -206,10 +207,14 @@ class OutboxStore(AlertStore):
                         self._insert_notice(conn, row["sub_id"],
                             "OrbitDiff notification submission is working again. Previously uncertain notices remain in status for review.",
                             "delivery_recovery", current)
+                return True
 
     def resolve(self, notice_id: str, *, action: str, now: datetime) -> None:
         if action not in {"retry", "discard"}:
             raise ValueError("choose retry or discard")
+        with self._read_connection() as conn:
+            if conn is None or not conn.execute("SELECT 1 FROM sqlite_master WHERE name='alert_notices'").fetchone():
+                raise ValueError("only uncertain or failed notices can be resolved")
         with self._connection() as conn:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")

@@ -198,3 +198,37 @@ def test_unsupported_platform_has_no_submission(monkeypatch):
         raise AssertionError('must not run')
     monkeypatch.setattr('orbitdiff.alert_delivery.subprocess.run',run)
     assert MacOSSender().send('synthetic','key').state == 'failed'
+
+
+def test_delivery_batch_refreshes_leases_as_time_passes(tmp_path,monkeypatch):
+    from orbitdiff.alert_delivery import DeliveryResult, dispatch
+
+    store,job=setup(tmp_path)
+    for i in range(3):
+        store.status_notice(job,identity=str(i),payload='Synthetic status',now=NOW)
+    elapsed=[0.0]
+    monkeypatch.setattr('time.monotonic',lambda: elapsed[0])
+    class SlowSender:
+        idempotent=False
+        def send(self,payload,key):
+            elapsed[0]+=80
+            return DeliveryResult('accepted','submitted_to_macos')
+    dispatch(store,job,SlowSender(),now=NOW)
+    attempts=store.delivery_attempts(job)
+    assert attempts[1]['started_at']=='2026-10-01T08:01:20+00:00'
+    assert attempts[-1]['finished_at']=='2026-10-01T08:04:00+00:00'
+
+
+def test_late_sender_cannot_report_success_after_lease_is_lost(tmp_path):
+    from orbitdiff.alert_delivery import DeliveryResult, dispatch
+
+    store,job=setup(tmp_path)
+    store.status_notice(job,identity='one',payload='Synthetic status',now=NOW)
+    class SuspendedSender:
+        idempotent=False
+        def send(self,payload,key):
+            assert store.claim_notice(job,now=NOW+timedelta(minutes=3),idempotent=False) is None
+            return DeliveryResult('accepted','submitted_to_macos')
+    receipts=dispatch(store,job,SuspendedSender(),now=NOW)
+    assert receipts[0]['state']=='uncertain'
+    assert store.notices(job)[0]['state']=='uncertain'

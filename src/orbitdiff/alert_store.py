@@ -78,8 +78,17 @@ class AlertStore(GraphStore):
                 state = self._target_status(conn, job["target"])
                 job.update(last_attempt_at=state["last_attempt_at"],
                            last_complete_at=state["last_success_at"], pending_count=state["pending_count"])
-                job["next_due_at"] = (next_due(current, job["time"], job["timezone"]).isoformat()
-                                      if job["state"] == "enabled" else None)
+                job["next_due_at"], job["due_now"] = None, False
+                if job["state"] == "enabled":
+                    due = daily_due(current, job["time"], job["timezone"])
+                    boundary = max(datetime.fromisoformat(job["activated_at"]),
+                                   datetime.fromisoformat(job["last_due"] or job["activated_at"]))
+                    due_day = due.astimezone(ZoneInfo(job["timezone"])).date().isoformat()
+                    job["due_now"] = due > boundary and (not job["last_day"] or due_day > job["last_day"])
+                    following = due if job["due_now"] else next_due(max(current, boundary), job["time"], job["timezone"])
+                    if job["last_day"] and following.astimezone(ZoneInfo(job["timezone"])).date().isoformat() <= job["last_day"]:
+                        following = next_due(following, job["time"], job["timezone"])
+                    job["next_due_at"] = following.isoformat()
                 job["runs"] = [dict(r) for r in conn.execute(
                     "SELECT * FROM alert_windows WHERE job_id=? ORDER BY due_at DESC LIMIT 30", (job["id"],)
                 )]
@@ -162,17 +171,29 @@ class AlertStore(GraphStore):
                     raise ValueError("removed job cannot be changed")
                 conn.execute("UPDATE alert_jobs SET state=? WHERE id=?", (state, job_id))
 
-    def update(self, job_id: str, *, time: str, timezone: str, now: datetime) -> None:
+    def update(self, job_id: str, *, time: str, timezone: str, now: datetime,
+               runtime: Path | None = None, login: str | None = None,
+               session_file: Path | None = None) -> None:
         schedule_parts(time, timezone)
         current = aware(now)
+        if runtime is not None:
+            validate_local_path(runtime)
+            if not runtime.is_absolute() or not runtime.is_file() or not os.access(runtime, os.X_OK):
+                raise ValueError("runtime must be an existing absolute executable")
+        if login is not None:
+            login = normalize_target(login)
+        if session_file is not None:
+            session_file = validate_local_path(session_file)
         with self._connection() as conn:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 job = self._job(conn, job_id)
                 if job["state"] != "paused":
                     raise ValueError("configuration changes require a paused job")
-                conn.execute("""UPDATE alert_jobs SET time=?,timezone=?,host_job_id=NULL,activated_at=?
-                                WHERE id=?""", (time, timezone, current.isoformat(), job_id))
+                conn.execute("""UPDATE alert_jobs SET time=?,timezone=?,host_job_id=NULL,activated_at=?,
+                    runtime=?,login=?,session_file=? WHERE id=?""",
+                    (time, timezone, current.isoformat(),str(runtime) if runtime else job["runtime"],
+                     login or job["login"], str(session_file) if session_file else job["session_file"], job_id))
 
     def claim_window(self, job_id: str, *, now: datetime) -> dict[str, Any] | None:
         current = aware(now)
@@ -182,6 +203,9 @@ class AlertStore(GraphStore):
                 job = self._job(conn, job_id)
                 if job["state"] != "enabled":
                     return None
+                conn.execute("""UPDATE alert_windows SET state='interrupted',reason='worker_interrupted',finished_at=?
+                              WHERE job_id=? AND state='running' AND claimed_at<?""",
+                             (current.isoformat(), job_id, (current-timedelta(minutes=30)).isoformat()))
                 due = daily_due(current, job["time"], job["timezone"])
                 activation = datetime.fromisoformat(job["activated_at"])
                 zone = ZoneInfo(job["timezone"])
@@ -193,9 +217,6 @@ class AlertStore(GraphStore):
                 first = next_due(max(activation, datetime.fromisoformat(job["last_due"]) if job["last_due"] else activation),
                                  job["time"], job["timezone"])
                 missed = max(0, (due.astimezone(zone).date() - first.astimezone(zone).date()).days)
-                conn.execute("""UPDATE alert_windows SET state='interrupted',reason='worker_interrupted',finished_at=?
-                              WHERE job_id=? AND state='running' AND claimed_at<?""",
-                             (current.isoformat(), job_id, (current-timedelta(minutes=30)).isoformat()))
                 window_id = uuid.uuid4().hex
                 conn.execute("""INSERT INTO alert_windows
                     (id,job_id,due_at,claimed_at,state,missed_windows,missed_from)
