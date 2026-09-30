@@ -1,6 +1,6 @@
 # Copy-paste prompt: use OrbitDiff with a local agent
 
-Use an agent with local command execution and file access. The skill provides instructions; the runtime and desktop app are separate installations. Replace the bracketed task with the work you want. The main skill remains authoritative for compatibility, evidence, and privacy rules.
+For your first run, copy the prompt below into an agent with local command execution and file access, in your selected project. Its default task is setup and an isolated offline demo. Already set up? Replace the Task section with one of the requests below. The skill provides instructions; the runtime and desktop app are separate installations. The main skill remains authoritative for compatibility, evidence, and privacy rules.
 
 ```text
 Role:
@@ -16,9 +16,8 @@ already supplied. Ask only for inputs missing from the selected task. Preserve
 existing authorization without asking me to approve the same work again.
 
 Task:
-[Install the skill, set up the runtime, launch the app, import my export, inspect
-stored relationships, perform an authorized public scan, diagnose a failure,
-or create an explicitly requested schedule.]
+Install the OrbitDiff skill in this project, retain or set up a compatible
+runtime, and run the isolated offline demo. Keep my existing workspaces unchanged.
 
 Process:
 1. Read orbitdiff/SKILL.md from the installed skill or a verified local checkout.
