@@ -76,6 +76,105 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+async function requestJSON(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  let timer;
+  const response = Promise.resolve().then(async () => {
+    const result = await fetch(url, { ...options, cache: "no-store", credentials: "omit", signal: controller.signal });
+    return { ok: result.ok, status: result.status, data: await result.json() };
+  });
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("The local server did not respond before the request deadline.");
+      error.name = "TimeoutError";
+      reject(error);
+      controller.abort();
+    }, timeoutMs);
+  });
+  try { return await Promise.race([response, deadline]); }
+  finally { clearTimeout(timer); }
+}
+
+function createSetupController({ request = requestJSON, onChange = () => {}, timeouts = {} } = {}) {
+  const deadlines = { session: 15000, import: 60000, scan: 300000, ...timeouts };
+  const drafts = {
+    import: { account: null, captured: "", files: [], completeFollowers: false, completeFollowing: false },
+    scan: { target: "", login: "", baseline: false },
+  };
+  const operations = {
+    import: { phase: "idle", message: "" },
+    scan: { phase: "idle", message: "" },
+  };
+  const activeOperation = () => {
+    const kind = Object.keys(operations).find(key => ["preparing", "running", "uncertain"].includes(operations[key].phase));
+    return kind ? { kind, ...operations[kind] } : null;
+  };
+  const getDraft = kind => ({ ...drafts[kind], ...(kind === "import" ? { files: [...drafts.import.files] } : {}) });
+  const updateDraft = (kind, values) => {
+    if (!Object.hasOwn(drafts, kind)) return;
+    for (const key of Object.keys(drafts[kind])) {
+      if (Object.hasOwn(values, key)) drafts[kind][key] = key === "files" ? [...values.files] : values[key];
+    }
+  };
+  const updateOperation = (kind, phase, message) => {
+    operations[kind] = { phase, message };
+    onChange();
+  };
+  async function submit(kind, buildPayload) {
+    if (!Object.hasOwn(drafts, kind) || activeOperation()) return { started: false, ok: false };
+    updateOperation(kind, "preparing", kind === "import" ? "Reading your selected export…" : "Connecting to the local workspace…");
+    let sent = false;
+    try {
+      const payload = await buildPayload(getDraft(kind));
+      const session = await request("/api/session", {}, deadlines.session);
+      if (!session.ok || typeof session.data?.token !== "string") throw new Error("Reopen Orbit OS before trying again.");
+      updateOperation(kind, "running", kind === "import" ? "Importing your export locally…" : "Running one public scan. You can inspect other views while it runs.");
+      sent = true;
+      const response = await request(`/api/${kind}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Orbit-Token": session.data.token }, body: JSON.stringify(payload),
+      }, deadlines[kind]);
+      if (!response.ok || response.data?.ok !== true) {
+        const error = new Error(response.data?.error || response.data?.message || "The operation could not be completed safely.");
+        error.confirmed = response.status < 500 && response.status >= 400 || response.ok && response.data?.ok === false;
+        throw error;
+      }
+      const message = kind === "import" ? (response.data.import_result?.duplicate ? "This export was already imported." : "Your export was imported locally.") : response.data.message || "The public scan finished. Review its results in Watchlist.";
+      updateOperation(kind, "succeeded", message);
+      return { started: true, ok: true, message };
+    } catch (error) {
+      if (sent && !error.confirmed) {
+        updateOperation(kind, "uncertain", `The ${kind === "import" ? "import" : "scan"} result could not be confirmed. The server may still finish. Submission is locked in this window. Check local status and the recorded results before reopening Orbit OS. A status refresh does not prove completion or cancellation.${kind === "scan" ? " The server’s scan cooldown still applies." : ""}`);
+      } else {
+        const detail = error.name === "TimeoutError" ? "The local session request timed out. Check that Orbit OS is running before trying again." : error.message || "The local operation could not finish.";
+        updateOperation(kind, "failed", `${sent ? "" : "Nothing was submitted. "}${detail}`);
+      }
+      return { started: true, ok: false, uncertain: operations[kind].phase === "uncertain" };
+    }
+  }
+  return { getDraft, updateDraft, getOperation: kind => ({ ...operations[kind] }), activeOperation, isLocked: () => Boolean(activeOperation()), submit };
+}
+
+function captureFocus(element) {
+  return {
+    id: element?.id || "", key: element?.dataset?.focusKey || "", group: element?.dataset?.focusGroup || "",
+    start: typeof element?.selectionStart === "number" ? element.selectionStart : null,
+    end: typeof element?.selectionEnd === "number" ? element.selectionEnd : null,
+    direction: element?.selectionDirection || "none",
+  };
+}
+
+function restoreFocus(snapshot, root = document) {
+  if (!snapshot.id && !snapshot.key) return;
+  const safeKey = value => /^[a-z0-9_-]+$/i.test(value);
+  let target = snapshot.id ? root.getElementById(snapshot.id) : safeKey(snapshot.key) ? root.querySelector(`[data-focus-key="${snapshot.key}"]`) : null;
+  if ((!target || target.disabled) && snapshot.group && safeKey(snapshot.group)) {
+    target = [...root.querySelectorAll(`[data-focus-group="${snapshot.group}"]`)].find(element => !element.disabled);
+  }
+  if (!target || target.disabled) target = root.getElementById("page-title");
+  target?.focus({ preventScroll: true });
+  if (snapshot.start !== null && target?.setSelectionRange) target.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
+}
+
 function statusInfo(source = {}) {
   const status = String(source.status || "missing").toLowerCase();
   if (["failed", "error", "failure"].includes(status)) return { label: "Collection failed", tone: "danger", icon: "alert" };
@@ -172,7 +271,11 @@ const ui = {
   watchlist: { selected: 0, query: "", page: 1 },
   activity: { source: "all", range: "30", query: "", page: 1 },
   chart: { metric: "followers", range: "30" },
+  results: {},
 };
+const setup = createSetupController({ onChange: () => renderOperationFeedback() });
+let retainedFileInput = null;
+let stateReadQueue = Promise.resolve();
 
 function personalData() { return ui.data?.personal || {}; }
 function metrics() { return personalData().metrics || {}; }
@@ -276,6 +379,7 @@ function paginate(items, group) {
   const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   ui[group].page = Math.max(1, Math.min(ui[group].page, pages));
   const page = ui[group].page;
+  ui.results[group] = { page, pages, total: items.length };
   return { rows: items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), page, pages, total: items.length };
 }
 
@@ -366,18 +470,118 @@ function systemView() {
   return `${pageHeading("System", "Collection health, data coverage, and the local systems behind your workspace.")}${notice}<div class="system-grid"><section class="panel"><div class="panel-heading"><h2>Source health</h2><span class="badge neutral">${sourceHealth.length} sources</span></div><div class="system-body">${sourceSystemCard(personalData(), true)}${watched().map(source => sourceSystemCard(source)).join("")}</div></section><section class="panel"><div class="panel-heading"><h2>Private by default</h2>${icon("shield", 18)}</div><div class="system-body"><div class="fact-row"><span>Storage</span><strong>This device only</strong></div><div class="fact-row"><span>Account access</span><strong>Read-only</strong></div><div class="fact-row"><span>Cloud sync</span><strong>None</strong></div><div class="fact-row"><span>Latest local refresh</span><strong>${h(formatDate(ui.data?.generated_at, true))}</strong></div><p class="system-guidance"><strong>Refresh data</strong> rereads local artifacts. It does not sign in, contact Instagram, run collection, or change existing schedules.</p><p class="system-guidance"><strong>When a source fails:</strong> keep the existing observations, review the tracker’s recovery guidance, and resolve its underlying collection problem before retrying. A hidden list never becomes zero.</p>${issueMarkup(ui.data?.issues)}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Existing schedules</h2><p class="section-subtitle">Status from your tracker jobs. Orbit does not modify them.</p></div></div><div class="schedule-table">${scheduleTable}</div><p class="table-note">Times are displayed in this browser’s local timezone. Schedule expressions are shown exactly as recorded by the source.</p></section>`;
 }
 
+function importFormMarkup() {
+  const draft = setup.getDraft("import");
+  return `<form id="import-form">
+    <label for="import-account">Your Instagram username</label>
+    <input id="import-account" name="account" required maxlength="30" autocomplete="off" value="${h(draft.account)}" placeholder="your_username">
+    <label for="import-files">Relationship export</label>
+    <input id="import-files" type="file" accept=".zip,.json" multiple ${draft.files.length ? "" : "required"} aria-describedby="import-files-summary">
+    <p class="field-help" id="import-files-summary"></p>
+    <label for="import-captured">Export capture time <span class="muted">(optional)</span></label>
+    <input id="import-captured" type="datetime-local" value="${h(draft.captured)}">
+    <p class="field-help">Use the export’s capture time, not the date you followed someone. Leave it blank if unknown.</p>
+    <label class="check-label"><input id="complete-followers" type="checkbox" ${draft.completeFollowers ? "checked" : ""}>I included every followers file from an all-time export.</label>
+    <label class="check-label"><input id="complete-following" type="checkbox" ${draft.completeFollowing ? "checked" : ""}>I included the complete following list from that export.</label>
+    <p class="field-help">These are your declarations. Without a known capture time and complete files, missing relationships remain unknown.</p>
+    <button id="import-submit" class="button button-primary" type="submit">Import locally</button>
+    <p class="form-result" id="import-result" role="status" aria-live="polite"></p>
+    <button class="button button-light" type="button" data-check-operation="import" hidden>Check local status</button>
+  </form>`;
+}
+
+function scanFormMarkup() {
+  const draft = setup.getDraft("scan");
+  return `<form id="scan-form">
+    <label for="scan-target">Public target username</label>
+    <input id="scan-target" name="target" required maxlength="30" autocomplete="off" value="${h(draft.target)}" placeholder="public_username">
+    <label for="scan-login">Your session’s login username</label>
+    <input id="scan-login" name="login" required maxlength="30" autocomplete="off" value="${h(draft.login)}" placeholder="your_username">
+    <label class="check-label"><input id="scan-baseline" type="checkbox" ${draft.baseline ? "checked" : ""}>Create this target’s first baseline.</label>
+    <p class="field-help">This button contacts Instagram. Baselines are silent; changes need two complete observations. Every attempt starts a 30-minute cooldown. Stop after a rate limit or session challenge.</p>
+    <button id="scan-submit" class="button button-primary" type="submit">Run one public scan</button>
+    <p class="form-result" id="scan-result" role="status" aria-live="polite"></p>
+    <button class="button button-light" type="button" data-check-operation="scan" hidden>Check local status</button>
+  </form>`;
+}
+
 function setupView() {
   const mode = ui.data?.workspace?.mode;
   if (mode !== "portable") return `${pageHeading("Setup", mode === "demo" ? "You are exploring synthetic data." : "This is a read-only compatibility workspace.")}<section class="panel setup-card"><p>${mode === "demo" ? "Exit the demo to import your own export or create a public watchlist." : "Imports and public scans use the portable workspace. The selected compatibility sources remain unchanged."}</p>${mode === "demo" ? '<button class="button button-primary" type="button" data-exit-demo="true">Open my workspace</button>' : ""}</section>`;
-  return `${pageHeading("Make it your workspace.", "Personal exports and public watchlists have independent setup and history.", '<button type="button" class="button button-light" data-demo="true">Try the demo</button>', "SETUP")}<div class="setup-grid"><section class="panel setup-card"><h2>Import your relationships</h2><p>Request your Instagram information in <strong>JSON</strong> format with <strong>All time</strong> and <strong>Followers and following</strong> selected. Choose the ZIP, or all followers and following JSON files together.</p><form id="import-form"><label for="import-account">Your Instagram username</label><input id="import-account" name="account" required maxlength="30" autocomplete="off" value="${h(personalData().username || "")}" placeholder="your_username"><label for="import-files">Relationship export</label><input id="import-files" type="file" accept=".zip,.json" multiple required><label for="import-captured">Export capture time <span class="muted">(optional)</span></label><input id="import-captured" type="datetime-local"><p class="field-help">Use the export’s capture time, not the date you followed someone. Leave it blank if unknown.</p><label class="check-label"><input id="complete-followers" type="checkbox">I included every followers file from an all-time export.</label><label class="check-label"><input id="complete-following" type="checkbox">I included the complete following list from that export.</label><p class="field-help">These are your declarations. Without a known capture time and complete files, missing relationships remain unknown.</p><button class="button button-primary" type="submit">Import locally</button><p class="form-result" id="import-result" role="status" aria-live="polite"></p></form></section><section class="panel setup-card"><h2>Track a public following list</h2><p>First create your own local session. Orbit never asks for passwords or verification codes in this window or in agent chat.</p><details class="session-help"><summary>One-time session setup</summary><p>In your own terminal, run:</p><pre><code>orbit-os login YOUR_USERNAME</code></pre><p>Using the standalone Mac app? Run its bundled command instead:</p><pre><code>"/Applications/Orbit OS.app/Contents/MacOS/orbit-os" login YOUR_USERNAME</code></pre><p>Complete the provider’s prompts yourself, then return here. This setup needs no separate Python installation when using the app bundle.</p></details><form id="scan-form"><label for="scan-target">Public target username</label><input id="scan-target" name="target" required maxlength="30" autocomplete="off" placeholder="public_username"><label for="scan-login">Your session’s login username</label><input id="scan-login" name="login" required maxlength="30" autocomplete="off" placeholder="your_username"><label class="check-label"><input id="scan-baseline" type="checkbox">Create this target’s first baseline.</label><p class="field-help">This button contacts Instagram. Baselines are silent; changes need two complete observations. Every attempt starts a 30-minute cooldown. Stop after a rate limit or session challenge.</p><button class="button button-primary" type="submit">Run one public scan</button><p class="form-result" id="scan-result" role="status" aria-live="polite"></p></form></section></div>`;
+  if (setup.getDraft("import").account === null) setup.updateDraft("import", { account: personalData().username || "" });
+  return `${pageHeading("Make it your workspace.", "Personal exports and public watchlists have independent setup and history.", '<button type="button" class="button button-light" data-demo="true">Try the demo</button>', "SETUP")}
+    <div class="setup-grid"><section class="panel setup-card"><h2>Import your relationships</h2>
+    <p>Request your Instagram information in <strong>JSON</strong> format with <strong>All time</strong> and <strong>Followers and following</strong> selected. Choose the ZIP, or all followers and following JSON files together.</p>
+    ${importFormMarkup()}</section><section class="panel setup-card"><h2>Track a public following list</h2>
+    <p>First create your own local session. Orbit never asks for passwords or verification codes in this window or in agent chat.</p>
+    <details class="session-help"><summary>One-time session setup</summary><p>In your own terminal, run:</p><pre><code>orbit-os login YOUR_USERNAME</code></pre><p>Using the standalone Mac app? Run its bundled command instead:</p><pre><code>"/Applications/Orbit OS.app/Contents/MacOS/orbit-os" login YOUR_USERNAME</code></pre><p>Complete the provider’s prompts yourself, then return here. This setup needs no separate Python installation when using the app bundle.</p></details>
+    ${scanFormMarkup()}</section></div>`;
+}
+
+function rememberSetupDrafts() {
+  const fields = [
+    ["import-account", "import", "account"], ["import-captured", "import", "captured"],
+    ["complete-followers", "import", "completeFollowers"], ["complete-following", "import", "completeFollowing"],
+    ["scan-target", "scan", "target"], ["scan-login", "scan", "login"], ["scan-baseline", "scan", "baseline"],
+  ];
+  for (const [id, kind, key] of fields) {
+    const field = document.getElementById(id);
+    if (field) setup.updateDraft(kind, { [key]: field.type === "checkbox" ? field.checked : field.value });
+  }
+  const fileInput = document.getElementById("import-files");
+  if (fileInput) {
+    retainedFileInput = fileInput;
+    if (fileInput.files.length) setup.updateDraft("import", { files: [...fileInput.files] });
+  }
+}
+
+function renderOperationFeedback() {
+  if (typeof document === "undefined") return;
+  const active = setup.activeOperation();
+  for (const kind of ["import", "scan"]) {
+    const operation = setup.getOperation(kind);
+    const form = document.getElementById(`${kind}-form`);
+    if (!form) continue;
+    const running = ["preparing", "running"].includes(operation.phase);
+    form.setAttribute("aria-busy", String(running));
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = setup.isLocked();
+    button.textContent = running ? (kind === "import" ? "Importing…" : "Scan in progress…") : operation.phase === "uncertain" ? "Outcome unconfirmed" : kind === "import" ? "Import locally" : "Run one public scan";
+    const result = document.getElementById(`${kind}-result`);
+    result.textContent = operation.message || (active && active.kind !== kind ? "Another operation needs to finish or be checked before submitting." : "");
+    result.dataset.state = operation.phase;
+    form.querySelector("[data-check-operation]").hidden = operation.phase !== "uncertain";
+  }
+  const fileInput = document.getElementById("import-files");
+  if (fileInput) {
+    const files = setup.getDraft("import").files;
+    fileInput.required = !files.length;
+    document.getElementById("import-files-summary").textContent = files.length ? `${files.length} ${files.length === 1 ? "file retained" : "files retained"} for this import. Choose files to replace the selection.` : "Choose a ZIP or all relationship JSON files. Selection stays in this window until you close it.";
+  }
+  const notice = document.getElementById("operation-notice");
+  if (!notice) return;
+  notice.hidden = !active || ui.view === "setup";
+  if (active && ui.view !== "setup") {
+    notice.innerHTML = `<section class="status-banner" aria-label="Local operation">${icon(active.phase === "uncertain" ? "alert" : "clock", 18)}<div class="status-banner-copy"><strong>${active.phase === "uncertain" ? "Operation result unconfirmed" : active.kind === "import" ? "Import in progress" : "Public scan in progress"}</strong><p>${h(active.message)}</p></div><button type="button" class="button" data-go="setup">View operation</button></section>`;
+  }
+}
+
+function identifyFocusControls(root) {
+  for (const [selector, attribute, prefix] of [
+    ["[data-chart-range]", "chartRange", "chart-range"], ["[data-chart-metric]", "chartMetric", "chart-metric"],
+    ["[data-relationship-filter]", "relationshipFilter", "relationship-filter"],
+  ]) root.querySelectorAll(selector).forEach(element => { element.dataset.focusKey = `${prefix}-${element.dataset[attribute]}`; });
+  root.querySelectorAll("[data-page-group]").forEach(element => {
+    element.dataset.focusKey = `${element.dataset.pageGroup}-${element.getAttribute("aria-label") === "Next page" ? "next" : "previous"}`;
+    element.dataset.focusGroup = `${element.dataset.pageGroup}-pages`;
+  });
 }
 
 function render() {
   if (typeof document === "undefined") return;
   const main = document.getElementById("main-content");
-  const focused = document.activeElement;
-  const activeId = focused?.id;
-  const selection = focused instanceof HTMLInputElement ? focused.selectionStart : null;
+  const focus = captureFocus(document.activeElement);
+  rememberSetupDrafts();
   main.setAttribute("aria-busy", String(ui.loading));
   if (!ui.data) {
     if (ui.error) main.innerHTML = `<div class="loading-state"><h1 id="page-title">Your workspace is unavailable</h1><p>${h(ui.error)}</p><button class="button button-primary" type="button" data-retry="true">Try again</button></div>`;
@@ -385,6 +589,10 @@ function render() {
   }
   const views = { overview: overviewView, relationships: relationshipsView, watchlist: watchlistView, activity: activityView, setup: setupView, system: systemView };
   main.innerHTML = `${ui.data?.workspace?.demo ? '<div class="demo-banner"><strong>Synthetic demo</strong><span>This data is isolated from your workspace.</span><button type="button" class="button" data-exit-demo="true">Exit demo</button></div>' : ""}${views[ui.view]()}`;
+  const newFileInput = document.getElementById("import-files");
+  if (newFileInput && retainedFileInput && newFileInput !== retainedFileInput) newFileInput.replaceWith(retainedFileInput);
+  identifyFocusControls(main);
+  renderOperationFeedback();
   document.title = `${VIEW_NAMES[ui.view]} | Orbit OS`;
   document.getElementById("current-view").textContent = VIEW_NAMES[ui.view];
   document.querySelectorAll("[data-view]").forEach(link => {
@@ -396,13 +604,7 @@ function render() {
   document.getElementById("system-dot").hidden = ![personalData(), ...watched()].some(source => statusInfo(source).tone !== "ok");
   document.getElementById("footer-updated").textContent = `Local data read ${formatDate(ui.data.generated_at, true)}`;
   document.getElementById("sidebar-profile").innerHTML = `${avatar(personalData())}<span>${h(personalData().username ? `@${personalData().username}` : "Personal workspace")}<small>Personal account</small></span>`;
-  if (activeId) {
-    const restored = document.getElementById(activeId);
-    if (restored) {
-      restored.focus({ preventScroll: true });
-      if (selection !== null && restored instanceof HTMLInputElement) restored.setSelectionRange(selection, selection);
-    }
-  }
+  restoreFocus(focus);
 }
 
 function announce(message) {
@@ -413,8 +615,19 @@ function announce(message) {
   announce.timer = setTimeout(() => { toast.hidden = true; }, 4500);
 }
 
-async function loadState(demo = false) {
-  if (ui.loading) return;
+function announceResults(group) {
+  const result = ui.results[group];
+  if (!result) return;
+  announce(`${count(result.total)} ${group === "activity" ? "events" : "accounts"}. Page ${result.page} of ${result.pages}.`);
+}
+
+function loadState(demo = false) {
+  const requestedRead = stateReadQueue.then(() => readState(demo));
+  stateReadQueue = requestedRead.catch(() => {});
+  return requestedRead;
+}
+
+async function readState(demo) {
   ui.loading = true;
   const button = document.getElementById("refresh-data");
   button.disabled = true;
@@ -495,20 +708,27 @@ function handleClick(event) {
   } else if (target.dataset.chartRange) {
     ui.chart.range = target.dataset.chartRange;
     render();
+    announce(`${historyPoints().length} recorded observations in the selected range.`);
   } else if (target.dataset.chartMetric) {
     ui.chart.metric = target.dataset.chartMetric;
     render();
+    announce(`${ui.chart.metric === "followers" ? "Followers" : "Following"} history. ${historyPoints().length} recorded observations.`);
   } else if (target.dataset.relationshipFilter) {
     ui.relationships.filter = target.dataset.relationshipFilter;
     ui.relationships.page = 1;
     render();
+    announceResults("relationships");
   } else if (target.dataset.pageGroup && Object.hasOwn(ui, target.dataset.pageGroup)) {
     ui[target.dataset.pageGroup].page = Number(target.dataset.page);
     render();
+    announceResults(target.dataset.pageGroup);
   } else if (target.dataset.watchActivity) {
     ui.activity.source = "watchlist";
     ui.activity.page = 1;
     navigate("activity");
+  } else if (target.dataset.checkOperation) {
+    navigate(target.dataset.checkOperation === "import" ? "relationships" : "watchlist");
+    loadState();
   } else if (target.dataset.demo) { ui.view = "overview"; loadState(true); }
   else if (target.dataset.exitDemo) { ui.view = "overview"; loadState(false); }
   else if (target.dataset.export) exportCSV(target.dataset.export);
@@ -524,56 +744,54 @@ function encodedFile(file) {
   });
 }
 
+async function buildSetupPayload(kind, draft) {
+  if (kind === "scan") return { target: draft.target.trim(), login: draft.login.trim(), baseline: draft.baseline };
+  const chosen = draft.files;
+  if (!chosen.length || chosen.length > 256 || chosen.reduce((total, file) => total + file.size, 0) > 28 * 1024 * 1024) throw new Error("Choose a ZIP or relationship JSON files totaling at most 28 MB.");
+  return {
+    account: String(draft.account || "").trim(), captured_at: draft.captured ? new Date(draft.captured).toISOString() : null,
+    complete_followers: draft.completeFollowers, complete_following: draft.completeFollowing,
+    files: await Promise.all(chosen.map(encodedFile)),
+  };
+}
+
 async function handleSubmit(event) {
   const form = event.target;
-  if (!['import-form', 'scan-form'].includes(form.id)) return;
+  if (!["import-form", "scan-form"].includes(form.id)) return;
   event.preventDefault();
-  const importing = form.id === "import-form";
-  const status = document.getElementById(importing ? "import-result" : "scan-result");
-  const button = form.querySelector('button[type="submit"]');
-  button.disabled = true;
-  status.textContent = importing ? "Reading your selected export…" : "Running one public scan. Keep this window open…";
-  let successMessage = "";
-  try {
-    let payload;
-    if (importing) {
-      const chosen = [...document.getElementById("import-files").files];
-      if (!chosen.length || chosen.length > 256 || chosen.reduce((total, file) => total + file.size, 0) > 28 * 1024 * 1024) throw new Error("Choose a ZIP or relationship JSON files totaling at most 28 MB.");
-      const captured = document.getElementById("import-captured").value;
-      payload = { account: document.getElementById("import-account").value.trim(), captured_at: captured ? new Date(captured).toISOString() : null,
-        complete_followers: document.getElementById("complete-followers").checked, complete_following: document.getElementById("complete-following").checked,
-        files: await Promise.all(chosen.map(encodedFile)) };
-    } else {
-      payload = { target: document.getElementById("scan-target").value.trim(), login: document.getElementById("scan-login").value.trim(), baseline: document.getElementById("scan-baseline").checked };
-    }
-    const sessionResponse = await fetch("/api/session", { cache: "no-store", credentials: "omit" });
-    if (!sessionResponse.ok) throw new Error("Reopen Orbit OS before trying again.");
-    const session = await sessionResponse.json();
-    const response = await fetch(importing ? "/api/import" : "/api/scan", { method: "POST", credentials: "omit", headers: { "Content-Type": "application/json", "X-Orbit-Token": session.token }, body: JSON.stringify(payload) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "The operation could not be completed safely.");
-    if (!result.ok) throw new Error(result.message || "The scan stopped. Check your local session and wait before retrying.");
-    successMessage = importing ? (result.import_result.duplicate ? "This export was already imported." : "Your export was imported locally.") : result.message;
-    if (importing) ui.view = "relationships";
+  rememberSetupDrafts();
+  const kind = form.id === "import-form" ? "import" : "scan";
+  const result = await setup.submit(kind, draft => buildSetupPayload(kind, draft));
+  if (!result.started) return;
+  if (result.ok) {
     await loadState();
-    announce(successMessage);
-  } catch (error) {
-    status.textContent = error.message || "The local operation did not finish. Reopen Orbit OS and check your workspace.";
-  } finally {
-    button.disabled = false;
-  }
+    if (kind === "import" && ui.view === "setup") navigate("relationships");
+    announce(result.message);
+  } else if (ui.view !== "setup") announce(setup.getOperation(kind).message);
 }
 
 function handleInput(event) {
+  if (event.target.closest("#import-form, #scan-form")) {
+    rememberSetupDrafts();
+    return;
+  }
   const queryGroups = { "relationship-search": "relationships", "watch-search": "watchlist", "activity-search": "activity" };
   const group = queryGroups[event.target.id];
   if (!group) return;
   ui[group].query = event.target.value;
   ui[group].page = 1;
   render();
+  clearTimeout(handleInput.announcementTimer);
+  handleInput.announcementTimer = setTimeout(() => announceResults(group), 300);
 }
 
 function handleChange(event) {
+  if (event.target.closest("#import-form, #scan-form")) {
+    if (event.target.id === "import-files") setup.updateDraft("import", { files: [...event.target.files] });
+    rememberSetupDrafts();
+    renderOperationFeedback();
+    return;
+  }
   if (event.target.id === "relationship-sort") ui.relationships.sort = event.target.value;
   else if (event.target.id === "activity-source") ui.activity.source = event.target.value;
   else if (event.target.id === "activity-range") ui.activity.range = event.target.value;
@@ -581,6 +799,7 @@ function handleChange(event) {
   ui.relationships.page = 1;
   ui.activity.page = 1;
   render();
+  announceResults(event.target.id === "relationship-sort" ? "relationships" : "activity");
 }
 
 function initialize() {
@@ -600,5 +819,5 @@ function initialize() {
   loadState();
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { h, profileURL, csvCell, describeEvent, statusInfo, dateValue, historySVG, sourceBanner, watchAccountTable };
+if (typeof module !== "undefined" && module.exports) module.exports = { h, profileURL, csvCell, describeEvent, statusInfo, dateValue, historySVG, sourceBanner, watchAccountTable, requestJSON, createSetupController, captureFocus, restoreFocus };
 if (typeof document !== "undefined") initialize();
