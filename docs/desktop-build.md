@@ -4,6 +4,8 @@ Orbit OS has two separate distributions: the portable `orbitdiff` Agent Skill an
 
 ## Platform and release status
 
+The latest patch verification and exact artifact checksums are recorded in [0.2.1 verification](verification-0.2.1.md). The historical 0.2.0 results below remain unchanged.
+
 The current recipe targets Apple Silicon macOS with macOS 13 or newer declared in the bundle. Runtime verification is performed on the actual build machine; the declared minimum is not a claim that every supported macOS release has been tested. Intel macOS, Windows, and Linux do not have verified artifacts from this recipe. They require their own native builds and installation checks.
 
 The candidate uses an ad-hoc signature. It does not have a Developer ID signature or Apple notarization. A valid ad-hoc signature confirms local bundle integrity; it does not establish a trusted publisher or guarantee downloaded-file launch approval. A public release must state that limitation and include the recorded quarantine result. Never disable Gatekeeper to make a test pass.
