@@ -2,7 +2,7 @@
 
 ## Supported version
 
-Security fixes target the current `0.1.x` release line.
+Security fixes target the current `0.2.x` release line. The `0.1.x` line is no longer the supported target. Check the selected release's verification record for its separate preview and readiness limits.
 
 ## Report a vulnerability
 
@@ -12,4 +12,4 @@ Do not include passwords, verification codes, saved-session material, browser da
 
 ## Scope
 
-OrbitDiff is a local public-data tool. Security reports are especially useful for credential handling, local file permissions, SQLite access, package contents, command injection, and accidental data collection outside the documented public-only scope.
+OrbitDiff handles owner-supplied personal relationship exports and separately collected public following lists. Security reports are especially useful for export isolation, credential handling, local file permissions, SQLite access, package contents, command injection, and collection outside those documented sources.
