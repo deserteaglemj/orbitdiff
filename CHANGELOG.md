@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.3] - Unreleased
+
+- Add opt-in daily public-following jobs, transactional due windows, shared live cooldown and stale-worker fencing, recorded gaps, and pause/resume/removal commands.
+- Reconcile persisted confirmations into frozen notification digests with durable attempts, bounded retries, and explicit uncertain-submission resolution. The initial transport is macOS Notification Center.
+- Document Codex host registration separately from runtime configuration. Ordinary installation stays inactive, and live collection, native submission, and three actual daily windows require their own evidence.
+- Preserve personal exports, existing public history, and published v0.2.2 installation pins. Extend candidate installation checks with synthetic daily workflows outside the checkout.
+
 ## [0.2.2] - 2026-09-30
 
 - Clarify skill task routing, workflow completion criteria, runtime authority, and conditional references.

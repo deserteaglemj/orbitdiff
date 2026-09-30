@@ -44,6 +44,11 @@ def load_workspace(workspace: Path) -> dict[str, Any]:
             "code": "watchlist_unreadable",
             "message": "The public watchlist could not be read safely. Your last saved data was not changed.",
         })
+    try:
+        from orbitdiff.alert_outbox import OutboxStore
+        result["schedules"] = OutboxStore(workspace / "orbitdiff.sqlite3").jobs()
+    except (OSError, ValueError, sqlite3.Error):
+        result["issues"].append({"code": "alerts_unreadable", "message": "Daily alert status could not be read safely."})
     return result
 
 

@@ -1,5 +1,7 @@
 # Install the skill and runtime separately
 
+Daily alerts require the unreleased 0.2.3 candidate and the capability checks in [scheduling](scheduling.md). The published v0.2.2 recipes below retain their original commands and do not supply daily alerts. Install a reviewed candidate only from its audited wheel and matching complete skill archive; record its commit and hashes.
+
 The skill supplies instructions. The runtime supplies `orbit-os` commands. Install only the requested pieces, using the user's existing authorization and selected project. A chat-only host cannot operate local files or commands.
 
 For runtime setup, first inspect any known local executable using [the main skill's compatibility contract](../SKILL.md). Retain a compatible executable and its actual path; PATH order or exit code 0 alone is insufficient. Do not replace an unrelated installation. If none qualifies, stop dependent workspace commands until authorized setup succeeds and report that workspace evidence remains uninspected. Skill-only installation needs no runtime check.

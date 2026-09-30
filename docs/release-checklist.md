@@ -48,6 +48,15 @@
 - [ ] If the required references are absent or the provider fails, leave the live gate Unproven or Fail and both deliverables not ready under `docs/release-readiness.md`.
 - [ ] If a later comparison is exercised, preserve the baseline, respect cooldown after every attempt, and record pending versus confirmed events without retries or manufactured relationship changes.
 
+## Daily alerts candidate
+
+- [ ] Run the candidate install checker with `--require-daily-alerts` outside the checkout; keep the published v0.2.2 check separate.
+- [ ] Verify additive migrations preserve relationship history, reservations, and personal exports; status and dry-run preserve missing storage.
+- [ ] Verify baseline/pending silence, confirmation, independent delivery retries, immutable chunks, paused jobs, uncertainty, DST and bounded catch-up.
+- [ ] Read back the selected host job only after explicit activation inputs and manual live proof exist. Inventory and change only owned jobs.
+- [ ] Record native submission, device display, scheduled execution, real-event delivery, and three actual daily windows as separate gates. Leave unavailable gates Unproven.
+- [ ] Retain the matching candidate version in wheel, skill, metadata and changelog; leave published install pins unchanged until a new release is authorized and verified.
+
 ## External publication
 
 When publication is authorized, require passing CI, publish the reviewed commit and immutable version tag, attach only audited public artifacts and checksums, and verify remote readback plus a pinned skill installation. Do not describe a Mac developer preview as a notarized consumer installer.

@@ -12,10 +12,11 @@ Run the same check locally with the repository's existing development tools:
 python -m build
 python scripts/build_skill.py --output-dir dist
 python scripts/check_skill_install.py \
-  --wheel dist/orbitdiff-0.2.2-py3-none-any.whl \
-  --skill-archive dist/orbitdiff-skill-0.2.2.zip \
+  --wheel dist/orbitdiff-0.2.3-py3-none-any.whl \
+  --skill-archive dist/orbitdiff-skill-0.2.3.zip \
   --source-commit "$(git rev-parse HEAD)" \
-  --expected-version 0.2.2
+  --expected-version 0.2.3 \
+  --require-daily-alerts
 ```
 
 The checker creates a fresh temporary destination outside the checkout. It installs the wheel and dependencies in an isolated environment, removes source-shadowing paths, validates installed product origins and bytes, and retains one real executable. It checks help, versions, both synthetic demo lanes, and a persisted partial owner import followed by stored reads. Unknown reciprocity stays unknown, supplied fixtures remain unchanged, and default storage must stay absent.
@@ -23,6 +24,8 @@ The checker creates a fresh temporary destination outside the checkout. It insta
 The extracted skill must retain its required references, assets, metadata, version, and compatibility instructions. The JSON receipt records artifact hashes, the supplied source commit, commands, and outcome. A supplied commit is a provenance declaration: run from a clean reviewed commit, and use CI's checked-out commit and retained receipt to identify the candidate. A hash alone does not bind arbitrary local files to a Git commit.
 
 Use a new destination for every run if passing `--output-dir`. The checker refuses an existing directory and a destination inside the checkout. Local receipts and synthetic workspaces are retained for inspection; they are not public product data. Execution is bounded by subprocess timeouts, with no model inference or credentials in CI. Dependency installation uses the existing package index; an offline wheelhouse can be supplied explicitly.
+
+The optional `--require-daily-alerts` check runs the installed daily state machine with synthetic clocks, a synthetic collector, and a recording sender. It proves pending/confirmation, one digest, duplicate-window prevention, and pause behavior. It does not register a host job, contact Instagram, or submit a native notification. The published v0.2.2 check omits this newer capability.
 
 ## Published-release check
 
@@ -36,7 +39,7 @@ python scripts/check_published_skill.py \
 
 This uses existing GitHub CLI access to download the Python wheel, source archive, skill ZIP, and checksum manifest. It verifies checksums against both the manifest and GitHub asset digests, audits the archives, compares wheel product files and skill files with the pinned commit's Git blobs, and tests a pinned `gh skill install` in a fresh destination. It then runs the same installed-runtime check with `published` provenance.
 
-Tag identity and asset identities are checked again after installation. Supplying the expected commit rejects tag drift; this does not claim that repository tag protection is enabled. Candidate and published receipts remain separate even when both distributions declare version 0.2.2.
+Tag identity and asset identities are checked again after installation. Supplying the expected commit rejects tag drift; this does not claim that repository tag protection is enabled. Candidate and published receipts remain separate and must identify their own versions and commits.
 
 The installer comparison explicitly permits only its five observed `github-*` tracking fields (path, ref, repository, tree SHA, and the selected pin), equivalent string-map frontmatter formatting, and removal of one leading body newline. Every original value and body byte must otherwise agree. References and assets must match exactly. The release ZIP additionally carries the repository's MIT license; GitHub's skill-tree installation contains the tree's own files. A different installer schema fails closed for review.
 
@@ -44,7 +47,7 @@ The installer comparison explicitly permits only its five observed `github-*` tr
 
 Host results are recorded for specific versions, platforms, and installation routes. A folder copy establishes file installation only. A command smoke test establishes runtime execution only. Fresh workflow evidence needs an actual new host session that selects the installed skill, reads its references, invokes the retained installed executable, and produces a response supported by command receipts.
 
-Verified on 2026-09-30, Apple Silicon macOS 26.6.2:
+Historical v0.2.2 release and prior 0.2.2 candidate placement checks, recorded on 2026-09-30, Apple Silicon macOS 26.6.2. These rows do not establish discovery or execution of the newer 0.2.3 daily-alert skill:
 
 | Host | File placement and references | Host discovery | Fresh skill workflow | Runtime executed by host | Remaining prerequisite |
 | --- | --- | --- | --- | --- | --- |

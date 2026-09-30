@@ -40,6 +40,11 @@ def validate_database_path(path: Path) -> Path:
         validate_local_path(candidate)
         try:
             status = candidate.lstat()
+            if candidate != path and stat.S_ISREG(status.st_mode) and status.st_nlink == 0:
+                # SQLite can unlink a WAL/SHM file during stat. Recheck once;
+                # validate any replacement instead of accepting its predecessor.
+                validate_local_path(candidate)
+                status = candidate.lstat()
         except FileNotFoundError:
             continue
         if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:

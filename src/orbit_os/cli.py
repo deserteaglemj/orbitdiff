@@ -48,6 +48,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--hermes-home", type=Path)
     login = commands.add_parser("login", help="human-operated session setup in a local terminal")
     login.add_argument("username")
+    commands.add_parser("alerts", help="opt-in daily following alerts and notification status")
     return parser
 
 
@@ -71,6 +72,9 @@ def _login(username: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "alerts":
+        from .alerts_cli import main as alerts_main
+        return alerts_main(arguments[1:])
     if not arguments or (arguments[0].startswith("-") and arguments[0] not in {"--version", "--help", "-h"}):
         arguments.insert(0, "app")
     parser = _parser()

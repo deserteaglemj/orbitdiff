@@ -6,6 +6,7 @@ import json
 import stat
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 from types import ModuleType
@@ -15,6 +16,22 @@ from test_prepare_skill_evals import frozen_installation as frozen_installation
 
 ROOT = Path(__file__).parents[1]
 CHECKER = ROOT / "scripts" / "check_skill_install.py"
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+
+
+def test_daily_install_probe_requires_capability_and_preserves_missing_workspace(tmp_path, monkeypatch):
+    module = checker()
+    calls = []
+
+    def run(argv, cwd, commands, **kwargs):
+        calls.append(argv)
+        return "usage: no daily commands here"
+
+    monkeypatch.setattr(module, "_run", run)
+    with pytest.raises(ValueError, match="daily"):
+        module.verify_daily_alerts(Path("python"), Path("orbit-os"), tmp_path, [])
+    assert len(calls) == 1
+    assert not (tmp_path / "daily-workspace").exists()
 
 
 def checker() -> ModuleType:
@@ -98,8 +115,8 @@ def test_complete_skill_extraction_validates_references_assets_metadata_and_vers
 ) -> None:
     before = (hashlib.sha256(skill_archive.read_bytes()).hexdigest(), skill_archive.stat().st_mtime_ns)
     destination = tmp_path / "installed skill"
-    receipt = checker().validate_skill_archive(skill_archive, destination, "0.2.2")
-    assert receipt["version"] == "0.2.2" and receipt["compatibility_verified"] is True
+    receipt = checker().validate_skill_archive(skill_archive, destination, VERSION)
+    assert receipt["version"] == VERSION and receipt["compatibility_verified"] is True
     with zipfile.ZipFile(skill_archive) as archive:
         assert {str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()} == set(archive.namelist())
         for name in archive.namelist():
@@ -114,7 +131,7 @@ def test_invalid_skill_archive_is_rejected_before_any_extraction(
     destination = tmp_path / "installed skill"
     module = checker()
     with pytest.raises(ValueError):
-        module.validate_skill_archive(changed_archive(skill_archive, change), destination, "0.2.2")
+        module.validate_skill_archive(changed_archive(skill_archive, change), destination, VERSION)
     assert not destination.exists()
 
 
@@ -136,7 +153,7 @@ def test_duplicate_or_malformed_skill_and_host_metadata_is_rejected_before_extra
     module = checker()
     destination = tmp_path / "installed skill"
     with pytest.raises(ValueError, match="metadata|frontmatter|interface"):
-        module.validate_skill_archive(changed_archive(skill_archive, change), destination, "0.2.2")
+        module.validate_skill_archive(changed_archive(skill_archive, change), destination, VERSION)
     assert not destination.exists()
 
 
@@ -145,7 +162,7 @@ def test_non_svg_asset_root_is_rejected_before_extraction(tmp_path: Path, skill_
     module = checker()
     destination = tmp_path / "installed skill"
     with pytest.raises(ValueError, match="SVG"):
-        module.validate_skill_archive(changed_archive(skill_archive, change), destination, "0.2.2")
+        module.validate_skill_archive(changed_archive(skill_archive, change), destination, VERSION)
     assert not destination.exists()
 
 

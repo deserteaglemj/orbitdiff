@@ -6,7 +6,7 @@ There are two deliverables: the portable OrbitDiff Agent Skill and the separatel
 
 The first desktop target is Apple Silicon macOS. The application remains a developer preview: ad-hoc signed, without Developer ID signing or notarization. Gatekeeper rejection is an installation limitation, never a passing consumer-installation result. Declaring macOS 13 in bundle metadata does not establish testing on every later version; publish the actual tested operating system.
 
-Live public-watchlist verification is required before either deliverable is called ready. A verified offline preview may be published with that gate explicitly unproven. Signing, broader platforms, cloud services, automatic updates, and new scheduled processes are outside this preview's scope.
+Live public-watchlist verification is required before either deliverable is called ready. A verified offline preview may be published with that gate explicitly unproven. Signing, broader platforms, cloud services, and automatic updates remain outside this preview's scope. The 0.2.3 candidate adds explicit opt-in jobs through an existing Codex host scheduler, with no new daemon. Installation leaves jobs inactive.
 
 ## Observable acceptance criteria
 
@@ -26,6 +26,22 @@ Live public-watchlist verification is required before either deliverable is call
 | Later live comparison | When separately exercised, reuse the stored baseline, omit baseline initialization, respect at least 30 minutes after every attempt, and distinguish pending/confirmed events | Attempt timestamps and stored event evidence; no retry loop or fabricated change |
 | Updates and preservation | New versioned artifacts preserve older releases; installation instructions retain explicit workspace selection and do not reset data | Version/pin tests, prior artifact preservation, inspection/import regressions |
 | Publication | Exact reviewed commit passes CI; remote asset digests equal local audited assets and pinned skill installation succeeds | CI result, immutable tag/commit identity, remote readback |
+
+## Daily alerts gates
+
+The [scheduling reference](../skills/orbitdiff/references/scheduling.md) owns setup, host lifecycle, and recovery.
+
+| Gate | Required evidence |
+| --- | --- |
+| Candidate installation | Exact wheel and skill archive tested outside the checkout, installed origins and bytes verified, synthetic daily workflow receipt |
+| Host registration | Actual supported-tool job ID, selected timezone and cadence read back; runtime binding alone is insufficient |
+| Scheduled execution | Actual invocation from that registered scheduler, with its due-window receipt; a manual command is not this proof |
+| Live collection | Target-specific authorization and a complete bounded manual candidate workflow before activation, plus actual scheduled collection receipts |
+| Notification path | Labeled synthetic native submission receipt; provider acceptance, device display, and human acknowledgement reported separately |
+| Confirmed-event delivery | A real confirmed event linked to its frozen delivery unit and receipt; no-event days and synthetic messages do not establish this |
+| Repeated daily operation | At least three consecutive actual scheduled daily windows with complete collection and correct confirmed-event delivery or no-event handling; failures and missed windows do not count |
+
+Record missing gates as Unproven. Synthetic time advancement and a merged PR do not activate collection or establish daily reliability. Keep private targets, session references, and destinations out of public evidence.
 
 ## Reporting and gates
 

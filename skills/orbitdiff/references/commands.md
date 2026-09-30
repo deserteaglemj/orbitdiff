@@ -36,6 +36,10 @@ For read commands, inspect JSON even after exit code 0. A missing source or an e
 
 For inspection-only work, select `relationships`, `targets`, `status`, or `report` for the requested source. State whether the selected workspace or a verified isolated copy was read. Apply the main skill's inspection boundary; `doctor` is a setup/storage mutation, not a prerequisite for these reads.
 
+## Daily alert commands
+
+The 0.2.3 candidate adds `orbit-os alerts`. Load [scheduling](scheduling.md) for its authoritative command sequence, activation inputs, lifecycle, JSON receipts, and recovery. Probe actual help before selecting this route; published v0.2.2 lacks it. Stored workspace status now includes configured schedules without creating them.
+
 ## Original public-list CLI
 
 ```text

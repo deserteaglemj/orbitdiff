@@ -5,20 +5,17 @@ import json
 import sqlite3
 import sys
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from orbitdiff.live import MESSAGES, collect_live
 from orbitdiff.models import Event
 from orbitdiff.paths import database_path, default_data_dir, ensure_private_directory
 from orbitdiff.providers.base import (
-    CollectionIncompleteError,
     InvalidTargetError,
-    PrivateTargetError,
-    ProviderError,
-    SessionUnavailableError,
     normalize_target,
 )
 from orbitdiff.providers.fixture import FixtureProvider
@@ -91,30 +88,17 @@ def _print_events(events: Sequence[Event]) -> None:
 def _run_live(args: argparse.Namespace, baseline: bool) -> int:
     target = normalize_target(args.target)
     store = _store(args.data_dir)
-    if not store.reserve_live_attempt(target, cooldown=COOLDOWN):
-        print("scan cooldown active; wait 30 minutes before another live scan", file=sys.stderr)
-        return 3
-    if baseline and store.status(target)["initialized"]:
-        print("target already has a baseline; use an ordinary scan for later observations", file=sys.stderr)
-        return 2
     try:
-        collection = _make_live_provider(args).collect(target)
-        if not collection.complete:
-            raise CollectionIncompleteError("collection was not complete")
-        events = store.apply_collection(collection, baseline_run=baseline)
-    except (InvalidTargetError, PrivateTargetError, SessionUnavailableError) as error:
-        store.record_failed_run(target, str(error), baseline_run=baseline)
-        print(str(error), file=sys.stderr)
-        return 2
-    except (CollectionIncompleteError, ProviderError) as error:
-        store.record_failed_run(target, str(error), baseline_run=baseline)
-        print(str(error), file=sys.stderr)
-        return 3
+        result = collect_live(store, target, lambda: _make_live_provider(args), now=datetime.now(UTC),
+                              baseline=baseline, cooldown=COOLDOWN)
     except OSError:
         print("local storage failed", file=sys.stderr)
         return 4
+    if result.reason:
+        print(MESSAGES[result.reason], file=sys.stderr)
+        return 2 if result.reason in {"baseline_exists", "session_unavailable", "private_target", "invalid_target"} else 3
     if not baseline:
-        _print_events(events)
+        _print_events(result.events)
     return 0
 
 
