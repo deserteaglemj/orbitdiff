@@ -140,8 +140,12 @@ class AlertStore(GraphStore):
                     raise ValueError("a complete manual observation is required")
                 if job["state"] == "enabled":
                     return
+                self._on_enable(conn, job, current)
                 conn.execute("UPDATE alert_jobs SET state='enabled',activated_at=?,blocked_reason=NULL WHERE id=?",
                              (current.isoformat(), job_id))
+
+    def _on_enable(self, conn: sqlite3.Connection, job: dict[str, Any], now: datetime) -> None:
+        """Extension point for atomic subscription activation."""
 
     def pause(self, job_id: str) -> None:
         self._set_state(job_id, "paused")
