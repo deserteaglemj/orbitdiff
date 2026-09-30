@@ -9,6 +9,8 @@ import zipfile
 from pathlib import Path
 from secrets import token_urlsafe
 
+import pytest
+
 ROOT = Path(__file__).parents[1]
 AUDIT = ROOT / "scripts" / "package_audit.py"
 MAX_MEMBER_SIZE = 10 * 1024 * 1024
@@ -98,3 +100,29 @@ def test_package_audit_fails_closed_on_traversal_and_large_members(tmp_path: Pat
     assert result.returncode == 1
     assert "unsafe archive path" in result.stdout
     assert "member too large" in result.stdout
+
+
+@pytest.mark.parametrize("name", ["C:/outside.txt", "C:outside.txt", r"..\outside.txt", r"\outside.txt", r"orbitdiff\..\outside.txt"])
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_package_audit_rejects_paths_that_escape_on_windows(tmp_path: Path, name: str, kind: str) -> None:
+    archive = tmp_path / ("candidate.zip" if kind == "zip" else "candidate.tar.gz")
+    writer = write_wheel if kind == "zip" else write_sdist
+    writer(archive, {name: b"synthetic public sample"})
+
+    result = run_audit(archive)
+
+    assert result.returncode == 1
+    assert "unsafe archive path" in result.stdout
+
+
+@pytest.mark.parametrize("name", ["orbitdiff/.ssh/synthetic.txt", "orbitdiff/.HeRmEs/notes.txt", "orbitdiff/.git/config", "orbitdiff/.remember/notes.md", "orbitdiff/.ENV/cache.txt", "orbitdiff/session-example/notes.txt"])
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_package_audit_rejects_private_ancestors(tmp_path: Path, name: str, kind: str) -> None:
+    archive = tmp_path / ("candidate.zip" if kind == "zip" else "candidate.tar.gz")
+    writer = write_wheel if kind == "zip" else write_sdist
+    writer(archive, {name: b"synthetic public sample"})
+
+    result = run_audit(archive)
+
+    assert result.returncode == 1
+    assert "sensitive" in result.stdout
