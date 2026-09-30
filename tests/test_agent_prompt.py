@@ -113,7 +113,9 @@ def test_documented_archive_recipe_stops_before_extracting_invalid_inputs(
 def test_installation_release_pins_and_changelog_match_current_package() -> None:
     current = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     pins = re.findall(r"--pin v([0-9.]+)", INSTALLATION.read_text())
-    assert pins and set(pins) == {current}
+    released = re.search(r"^## \[([0-9.]+)\] - \d{4}-\d{2}-\d{2}$",
+                         (ROOT / "CHANGELOG.md").read_text(), re.MULTILINE)
+    assert released is not None and pins and set(pins) == {released.group(1)}
     heading = re.search(r"^## \[(.+?)\]", (ROOT / "CHANGELOG.md").read_text(), re.MULTILINE)
     assert heading is not None and heading.group(1) == current
 

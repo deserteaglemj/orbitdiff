@@ -23,6 +23,70 @@ from prepare_skill_evals import _RUNTIME_PROBE, _digest, _fingerprints, _metadat
 
 ROOT = Path(__file__).resolve().parents[1]
 
+DAILY_PROBE = r'''
+import json, sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from orbitdiff.alert_outbox import OutboxStore
+from orbitdiff.alert_delivery import DeliveryResult
+from orbitdiff.alerts import run_job
+from orbitdiff.models import Account, Collection
+
+root, executable = map(Path, sys.argv[1:])
+store = OutboxStore(root / "orbitdiff.sqlite3")
+now = datetime(2026, 10, 1, 8, tzinfo=UTC)
+store.apply_collection(Collection("atlas_studio", 0, (), True, now-timedelta(days=1)))
+job = store.configure("atlas_studio", login="orbit_demo", runtime=executable,
+    time="09:00", timezone="UTC", now=now)
+assert job["state"] == "paused"
+store.bind(job["id"], "synthetic-unregistered-host")
+store.enable(job["id"], now=now)
+payloads, attempts = [], []
+class Sender:
+    idempotent = False
+    def send(self, payload, key):
+        payloads.append(payload)
+        return DeliveryResult("accepted", "synthetic_transport_only")
+class Provider:
+    def collect(self, target):
+        attempts.append(instant)
+        return Collection(target, 1, (Account("1", "pixel_forge"),), True, instant)
+sender = Sender()
+for day in range(3):
+    instant = now+timedelta(days=day, hours=1)
+    result = run_job(store, job["id"], now=instant, provider_factory=Provider, sender=sender, runtime=executable)
+    assert result["collection"]["state"] == "success"
+    duplicate = run_job(store, job["id"], now=instant, provider_factory=Provider, sender=sender, runtime=executable)
+    assert duplicate["collection"] is None
+    assert len(payloads) == (0 if day == 0 else 1)
+assert len(attempts) == 3 and "pixel_forge" in payloads[0]
+store.pause(job["id"])
+instant += timedelta(days=1)
+assert run_job(store, job["id"], now=instant, provider_factory=Provider, sender=sender)["collection"] is None
+assert len(attempts) == 3
+print(json.dumps({"synthetic_daily_workflow": True, "duplicate_claims_prevented": True,
+    "pause_prevents_collection": True, "confirmation_digest": True,
+    "host_registration": "unproven", "live_collection": "not performed",
+    "native_submission": "not performed", "repeated_daily_operation": "unproven"}))
+'''
+
+
+def verify_daily_alerts(python: Path, orbit: Path, output: Path,
+                        commands: list[dict[str, Any]]) -> dict[str, Any]:
+    help_text = _run([str(orbit), "alerts", "--help"], output, commands)
+    if not all(name in help_text for name in ("setup", "run", "deliver", "dry-run", "pause")):
+        raise ValueError("installed runtime lacks daily alert capabilities")
+    workspace = output / "daily-workspace"
+    before = json.loads(_run([str(orbit), "alerts", "status", "--workspace", str(workspace)], output, commands))
+    if before["jobs"] or workspace.exists():
+        raise ValueError("daily inspection initialized missing storage")
+    result: dict[str, Any] = json.loads(_run([str(python), "-I", "-B", "-c", DAILY_PROBE,
+        str(workspace), str(orbit)], output, commands))
+    after = json.loads(_run([str(orbit), "alerts", "status", "--workspace", str(workspace)], output, commands))
+    if len(after["jobs"]) != 1 or after["jobs"][0]["state"] != "paused":
+        raise ValueError("daily installed state was not preserved")
+    return result
+
 
 def _zip_files(path: Path, *, limit: int) -> dict[str, bytes]:
     _check_path(path)
@@ -243,7 +307,7 @@ def _partial(personal: dict[str, Any]) -> None:
 
 def check_install(wheel: Path, skill_archive: Path, source_commit: str, *, output_dir: Path | None = None,
                   expected_version: str | None = None, provenance: str = "candidate",
-                  wheelhouse: Path | None = None) -> dict[str, Any]:
+                  wheelhouse: Path | None = None, require_daily_alerts: bool = False) -> dict[str, Any]:
     receipt: dict[str, Any] = {"schema_version": 1, "outcome": "error", "phase": "output",
                                "provenance": provenance, "source_commit": source_commit,
                                "commands": [], "checks": {}, "receipt_path": None,
@@ -344,6 +408,8 @@ def check_install(wheel: Path, skill_archive: Path, source_commit: str, *, outpu
             raise ValueError("owner export content or metadata changed")
         if any(Path(path).exists() for path in defaults):
             raise ValueError("a workflow wrote to default storage")
+        if require_daily_alerts:
+            receipt["daily_alerts"] = verify_daily_alerts(python, orbit, output, commands)
         receipt["phase"] = "preservation"
         if identity != verify_runtime(python, wheel, output, commands):
             raise ValueError("installed runtime changed during verification")
@@ -373,9 +439,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-version")
     parser.add_argument("--provenance", choices=("candidate", "published"), default="candidate")
     parser.add_argument("--wheelhouse", type=Path, help="Optional offline dependency wheels; disables package-index access")
+    parser.add_argument("--require-daily-alerts", action="store_true", help="Exercise synthetic daily behavior in the installed candidate")
     args = parser.parse_args(argv)
     result = check_install(args.wheel, args.skill_archive, args.source_commit, output_dir=args.output_dir,
-                           expected_version=args.expected_version, provenance=args.provenance, wheelhouse=args.wheelhouse)
+                           expected_version=args.expected_version, provenance=args.provenance, wheelhouse=args.wheelhouse,
+                           require_daily_alerts=args.require_daily_alerts)
     print(json.dumps(result, sort_keys=True))
     return 0 if result["outcome"] == "success" else 1
 

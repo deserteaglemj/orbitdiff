@@ -1,10 +1,10 @@
 ---
 name: orbitdiff
-description: Tracks Instagram followers, following, mutuals, nonreciprocal relationships, and follow/unfollow changes locally with Orbit OS and OrbitDiff. Handles stored relationship reports, runtime or app setup, personal JSON export imports, public following scans, failure recovery, and explicitly requested scan schedules. Separates export observations from confirmed public-list events and labels incomplete or stale evidence.
+description: Tracks Instagram followers, following, mutuals, nonreciprocal relationships, and follow/unfollow changes locally with Orbit OS and OrbitDiff. Handles stored relationship reports, runtime or app setup, personal JSON export imports, public following scans, failure recovery, and opt-in daily following alerts. Separates export observations from confirmed public-list events and labels incomplete or stale evidence.
 license: MIT
 compatibility: Requires local command execution and a verified stable OrbitDiff 0.2.x runtime, minimum 0.2.0, through Python 3.11+ or the separately bundled Orbit OS app. Personal imports work offline. Live public scans require a human-created local Instaloader session.
 metadata:
-  version: "0.2.2"
+  version: "0.2.3"
   source: "https://github.com/deserteaglemj/orbitdiff"
   runtime: "local"
 ---
@@ -35,7 +35,7 @@ This document is authoritative for runtime compatibility and these boundaries. T
 | Import the owner's export | [Personal exports](references/personal-exports.md), then the personal workflow below | Import receipt and relationship report identify the owner, coverage, dates, and current snapshot. Rejection remains a blocker; duplicates or older imports are reported accurately. |
 | Scan a public account's following | Public workflow below; [authentication](references/authentication.md) only for missing or rejected local login | The requested bounded attempt has a recorded result and updated stored status. Baseline, pending, confirmed, and failed outcomes stay distinct. |
 | Diagnose or recover from failure | [Commands and recovery](references/commands.md); [interpretation](references/safety.md) for uncertain evidence | Observed failure, retained evidence, unknown cause, and next permitted action are separated. Repair is complete only after its authorized verification succeeds. |
-| Schedule scans explicitly | [Cadence](references/scheduling.md) | A verified manual live workflow precedes an authorized host schedule whose job details are returned. Missing manual proof, scope, cadence, or scheduler support is a blocker. |
+| Configure or manage daily following alerts | [Daily alerts](references/scheduling.md) | Compatible daily commands, complete manual live proof, selected destination, and host registration precede activation. Report actual scheduled execution, notification submission, and repeated daily operation separately. |
 
 For a reusable setup prompt and example requests, read [onboarding](references/onboarding.md). Personal exports are snapshot observations; public-list events require two matching complete observations. App launch, refresh, and report do not collect data. Live tracking is ready only after the selected target's complete live collection succeeds; local setup or a demo alone cannot establish that.
 
@@ -52,7 +52,7 @@ Resolve and retain one executable before running commands:
 
 Every `orbit-os` example below means that chosen executable with separate arguments. Keep paths containing spaces as one argument. Do not assume a virtual environment is activated or the app added a PATH command. The bundled app does not supply a separate `orbitdiff` executable; use `orbit-os demo` and workspace commands there. Legacy `orbitdiff` commands are optional when that separate CLI is available.
 
-Compare the executable's actual `--version` response with the supported contract: stable `0.2.x`, minimum `0.2.0`. Verify the requested commands in its help. A compatible patch need not equal the current candidate pin, `0.2.2`; an older minor, prerelease, unreadable version, or future minor is not automatically compatible. Probe known local candidates without changing installations. If none qualifies, report that workspace evidence was not inspected and stop the dependent workflow. Only the authorized setup route may install a verified available runtime and repeat the check; do not invent a fallback candidate. The candidate pin does not establish that a release is published.
+Compare the executable's actual `--version` response with the supported contract: stable `0.2.x`, minimum `0.2.0`. Verify the requested commands in its help. A compatible patch need not equal the current candidate pin, `0.2.3`; an older minor, prerelease, unreadable version, or future minor is not automatically compatible. Probe known local candidates without changing installations. If none qualifies, report that workspace evidence was not inspected and stop the dependent workflow. Only the authorized setup route may install a verified available runtime and repeat the check; do not invent a fallback candidate. The candidate pin does not establish that a release is published.
 
 For existing-data inspection, use the verified executable and stored reads:
 

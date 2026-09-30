@@ -30,7 +30,7 @@ Once you have stored observations, give your agent a request like this:
 
 **Who is the new account?** Results identify its public handle and account ID. The local app links to the observed profile. OrbitDiff does not establish the person behind it, their gender, relationship status, or motives.
 
-**Can my agent check daily?** After the manual live workflow is verified, an explicitly requested schedule can use your agent host's supported scheduler. Live scans need a public target and a human-created local login session. Setup installs no recurring job. [Scheduling prerequisites](skills/orbitdiff/references/scheduling.md).
+**Can my agent check daily and notify me?** The unreleased **0.2.3 candidate** adds opt-in daily following alerts through a Codex host schedule and macOS notifications. It records confirmed additions, gaps, and delivery attempts. The host and logged-in Mac session must be available. Setup stays inactive until a manual live check and explicit activation; real scheduled operation remains Unproven. The published v0.2.2 install commands below do not include this feature. [Setup, pause, and evidence](skills/orbitdiff/references/scheduling.md).
 
 Public collection covers **following lists**. Other accounts' followers, private profiles, posts, and messages are outside this workflow. [Public scan setup and limits](skills/orbitdiff/SKILL.md#public-watchlists).
 

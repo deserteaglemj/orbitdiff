@@ -41,7 +41,7 @@ jobs:
           subprocess.run([
               sys.executable, "scripts/check_skill_install.py", "--wheel", str(wheel),
               "--skill-archive", str(skill), "--source-commit", os.environ["GITHUB_SHA"],
-              "--expected-version", version, "--provenance", "candidate",
+              "--expected-version", version, "--provenance", "candidate", "--require-daily-alerts",
               "--output-dir", str(Path(os.environ["RUNNER_TEMP"]) / "orbit-skill-install"),
           ], check=True, timeout=300)
           PY

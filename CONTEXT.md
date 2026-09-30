@@ -33,3 +33,15 @@ Orbit OS and the OrbitDiff Agent Skill operate on personal export observations a
 **Failed attempt**: A collection attempt that does not replace the last good relationship evidence. A generic failure does not establish its cause.
 
 **Read-only Instagram access**: Collection without account actions. Local imports, reports, and authorized collection can still write to the selected private workspace.
+
+**Scheduled daily window**: One eligible local calendar date for an enabled public-target job. A host wake can claim at most the most recent due window; missing dates remain gaps.
+
+**Notification subscription**: The selected destination and activation boundary for alerts about a job's future confirmed additions. Earlier confirmed history is retained without automatic replay.
+
+**Delivery unit**: A frozen digest or size-limited chunk with fixed event membership and a stable submission identity.
+
+**Delivery attempt**: One claimed submission of a delivery unit. Its receipt can record failure or uncertainty independently of collection success.
+
+**Provider acceptance**: The notification adapter accepted a submission. It does not establish device display or human acknowledgement.
+
+**Receipt**: A stored result of a specific attempted operation, identifying its evidence and any remaining uncertainty.

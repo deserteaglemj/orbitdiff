@@ -82,3 +82,5 @@ Example task requests:
 - **Owner import:** "Import my supplied JSON export for `atlas_studio` into my selected workspace. I have not declared either direction complete."
 - **Stored relationships:** "Show my stored personal relationships and export observations, with source dates and coverage. Do not collect new data."
 - **Diagnosis:** "Explain missing, stale, partial, or failed sources using stored evidence. Keep unknown causes unknown and report the next permitted action."
+
+- **Daily following alerts (0.2.3 candidate):** "Configure daily confirmed-addition alerts for my supplied public target, workspace, login reference, daily time, IANA timezone, and selected Mac notification destination. Read the scheduling reference, verify the daily runtime commands and manual live workflow, then use the supported Codex scheduling tool. Ask once for missing activation inputs. Keep ordinary setup inactive until those prerequisites are satisfied. Report configuration, actual scheduled execution, native submission, and repeated daily operation separately."
