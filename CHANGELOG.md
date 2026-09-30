@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.2] - 2026-09-30
+
+- Clarify skill task routing, workflow completion criteria, runtime authority, and conditional references.
+- Tie consuming-agent evaluation to an audited installed wheel, record actual runtime invocations, and expose embedded export instructions to the agent before grading.
+- Add a shared domain glossary and measurable release criteria that distinguish offline preview checks, live collection, and consumer installation trust.
+- Keep the Apple Silicon app a developer preview; signing, notarization, and live verification are reported separately.
+
 ## [0.2.1] - 2026-09-29
 
 - Preserve setup drafts, selected export files, and operation feedback through refresh and navigation. Restore keyboard focus after filtering and paging.

@@ -1,6 +1,6 @@
 # Commands and result contracts
 
-These commands require the verified stable 0.2.x portable contract, minimum 0.2.0. Substitute the exact executable chosen during installation for `orbit-os`: its PATH command, virtual-environment launcher, or full bundled-app path. Keep that same prefix for every command. The standalone Mac bundle supplies no separate `orbitdiff` executable; the original CLI section applies only when that CLI is separately available.
+Use the compatibility check and retained executable from [the main skill](../SKILL.md) before these commands. Every `orbit-os` example means that exact executable plus separate arguments. The original CLI section applies only when a separate `orbitdiff` executable is available.
 
 `orbit-os` personal and public data share one per-user application-data workspace. The legacy `orbitdiff` default data directory is separate. Use one explicit path with `--workspace PATH` and `--data-dir PATH` when combining them.
 
@@ -30,10 +30,11 @@ orbit-os login LOGIN_USERNAME
 | `status` or JSON `report` | Combined state with separate `personal`, `watchlist`, and `issues` |
 | `scan --baseline` | Silent on success; establishes first public-list state |
 | `scan` | Prints newly confirmed public events; silence can mean pending or no change |
+| `app --open` or `app --desktop` | Starts the local browser or desktop view; verify that the selected workspace renders, separately from live collection readiness |
 
 For read commands, inspect JSON even after exit code 0. A missing source or an error projection can be a successfully delivered response. A stale source is not a current observation.
 
-For inspection-only work, use stored reads directly or inspect a verified isolated copy when needed. State which workspace was read. Do not run `doctor`, initialize, reset, or change permissions merely to make the inspection succeed.
+For inspection-only work, select `relationships`, `targets`, `status`, or `report` for the requested source. State whether the selected workspace or a verified isolated copy was read. Apply the main skill's inspection boundary; `doctor` is a setup/storage mutation, not a prerequisite for these reads.
 
 ## Original public-list CLI
 
