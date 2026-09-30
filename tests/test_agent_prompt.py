@@ -35,7 +35,7 @@ def test_documented_offline_commands_work_in_an_empty_isolated_workspace(tmp_pat
     environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
     commands = [
         shlex.split(line.strip()) for line in PROMPT.read_text().splitlines()
-        if re.match(r"^   ORBIT_OS (?:--version|doctor|demo|status|targets|report)\b", line)
+        if re.match(r"^   ORBIT_OS (?:--version|--help|doctor|demo|status|targets|report)\b", line)
     ]
     assert commands, "The prompt must include executable offline proof commands"
     ran_demo = False
@@ -57,7 +57,7 @@ def test_documented_offline_commands_work_in_an_empty_isolated_workspace(tmp_pat
             assert payload["personal"]["status"] == "missing"
             assert payload["watchlist"] == []
     assert ran_demo
-    assert not list(workspace.iterdir()), "Offline demonstrations must not seed the real workspace"
+    assert not workspace.exists(), "Documented inspection and demos must not initialize a real workspace"
 
 
 def test_documented_login_command_refuses_agent_pipes() -> None:

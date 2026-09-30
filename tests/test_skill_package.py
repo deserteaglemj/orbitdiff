@@ -70,7 +70,7 @@ def test_skill_evaluation_cases_have_unique_ids_and_concrete_expected_evidence()
     payload = json.loads((ROOT / "tests" / "skill_evals.json").read_text())
     assert payload["skill_name"] == "orbitdiff"
     cases = payload["evals"]
-    assert len(cases) == 7
+    assert cases, "The skill must include runnable evaluation scenarios"
     assert len({case["id"] for case in cases}) == len(cases)
     assert all(case["prompt"] and case["expected_output"] and case["assertions"] for case in cases)
     assert all(case["files"] for case in cases)

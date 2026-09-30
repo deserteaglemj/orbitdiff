@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -107,7 +108,9 @@ def test_public_source_validation_prevents_private_paths_in_archive(tmp_path: Pa
 def test_version_mismatch_fails_without_publishing_archive(tmp_path: Path) -> None:
     source = source_tree(tmp_path)
     project = source / "pyproject.toml"
-    project.write_text(project.read_text().replace('version = "0.2.0"', 'version = "9.9.9"'))
+    original = project.read_text()
+    version = tomllib.loads(original)["project"]["version"]
+    project.write_text(original.replace(f'version = "{version}"', 'version = "9.9.9"'))
     result = build(source, tmp_path / "output")
     assert result.returncode == 1
     assert "version" in result.stderr.lower()
