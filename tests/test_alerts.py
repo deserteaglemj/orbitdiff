@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from shutil import copy2
 
 import pytest
 
@@ -183,3 +184,22 @@ def test_committed_auth_failure_blocks_even_if_orchestration_crashes(tmp_path, m
     run_job(restarted, ident, now=NOW+timedelta(days=1, hours=1), provider_factory=Rejected, sender=RecordingSender())
     assert len(calls) == 1
     assert len(restarted.notices(ident)) == 1
+
+
+def test_copied_workspace_cannot_deliver_original_subscription(tmp_path):
+    from orbitdiff.alerts import deliver_job
+
+    store, ident = job(tmp_path/'original')
+    for day in (1,2):
+        store.apply_collection(provider_at(NOW+timedelta(days=day))().collect('atlas_studio'))
+    store.reconcile_notifications(ident, now=NOW+timedelta(days=2))
+    duplicate = tmp_path/'inspection-copy'
+    duplicate.mkdir()
+    copy2(store.path, duplicate/'orbitdiff.sqlite3')
+    sender = RecordingSender()
+    result = deliver_job(OutboxStore(duplicate/'orbitdiff.sqlite3'), ident,
+                         now=NOW+timedelta(days=3), sender=sender)
+    assert result['outcome'] == 'blocked'
+    assert result['reason'] == 'workspace_mismatch'
+    assert sender.payloads == []
+    assert store.notices(ident)[0]['state'] == 'pending'

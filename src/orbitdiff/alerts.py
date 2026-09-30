@@ -14,6 +14,9 @@ from .providers.base import FollowingProvider
 
 
 def deliver_job(store: OutboxStore, job_id: str, *, now: datetime, sender: Sender) -> dict[str, Any]:
+    if str(store.path.parent.absolute()) != store.job(job_id)["workspace"]:
+        return {"outcome": "blocked", "reason": "workspace_mismatch", "job_id": job_id,
+                "events_enqueued": 0, "deliveries": [], "display_verified": False, "read_verified": False}
     queued = store.reconcile_notifications(job_id, now=now)
     deliveries = dispatch(store, job_id, sender, now=now)
     return {"outcome": ("partial" if any(r["state"] != "accepted" for r in deliveries) else
