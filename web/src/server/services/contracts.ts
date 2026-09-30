@@ -66,6 +66,45 @@ export interface IssueDto {
   message: string;
 }
 
+/**
+ * Stored in `profile.summary` by the derive job. It describes the current snapshot at the
+ * content revision recorded in `profile.derived_revision`. Freshness is not stored: it
+ * depends on the clock and is computed when the profile is read.
+ */
+export interface ProfileSummaryRecord {
+  snapshotId: string;
+  capturedAt: string | null;
+  coverage: { followers: CoverageDto; following: CoverageDto };
+  coverageLabel: string;
+  metrics: MetricsDto;
+  issues: IssueDto[];
+  /** Export observations derived from the whole dated history at this revision. */
+  eventCount: number;
+  /** True when the dated history holds a single snapshot, so nothing can be compared yet. */
+  baselineOnly: boolean;
+}
+
+/** Stored in `activity_entry.summary` for kind `review`. */
+export interface ReviewRecord {
+  trigger: "daily" | "manual";
+  evidence: EvidenceStatus;
+  capturedAt: string | null;
+  /** Whole hours since the capture time, or null when there is no dated import. */
+  ageHours: number | null;
+  followers: number | null;
+  following: number | null;
+}
+
+/** Stored in `activity_entry.summary` for kind `import_processed`. */
+export interface ImportProcessedRecord {
+  snapshotCount: number;
+  datedSnapshotCount: number;
+  baselineOnly: boolean;
+  eventCount: number;
+  added: { followers: number; following: number };
+  removed: { followers: number; following: number };
+}
+
 export interface JobDto {
   id: string;
   kind: JobKind;
