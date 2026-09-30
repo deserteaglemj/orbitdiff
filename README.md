@@ -17,11 +17,11 @@ The canonical skill name is **`orbitdiff`**. It supports agents with local comma
 
 The skill and runtime install separately. Start with the complete [copy-paste setup prompt](docs/prompt.md), or follow the [installation reference](skills/orbitdiff/references/installation.md).
 
-Install version 0.2.0 from the [GitHub release](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.0):
+Install version 0.2.1 from the [GitHub release](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.1):
 
 ```bash
-pipx install git+https://github.com/deserteaglemj/orbitdiff.git@v0.2.0
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.2.0 --agent codex --scope user
+pipx install git+https://github.com/deserteaglemj/orbitdiff.git@v0.2.1
+gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.2.1 --agent codex --scope user
 ```
 
 The v0.1.1 release does not include personal-export commands. To work from a verified source checkout instead:
@@ -42,7 +42,7 @@ Use the agent host you actually run. GitHub CLI's skill installer is optional: e
 
 The standalone **Orbit OS.app** candidate bundles Python, the interface, and the shared commands. It is independent of the Agent Skill and does not require an AI agent, source checkout, or separately installed Python.
 
-Use the separate app archive and checksum on the [release page](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.0). Extract it and move Orbit OS.app to an application folder. The app starts its own local server and owns its lifetime; it installs no startup item or daemon.
+Use the separate app archive and checksum on the [release page](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.1). Extract it and move Orbit OS.app to an application folder. The app starts its own local server and owns its lifetime; it installs no startup item or daemon.
 
 The initial desktop candidate targets **Apple Silicon macOS**. It uses ad-hoc signing and is **not Developer ID signed or notarized**. Gatekeeper rejected a quarantined copy during verification, so this download is a developer preview and requires proper signing before a normal consumer release. Do not disable platform protections. Windows, Linux, and other architectures remain unverified until their own builds and installation tests pass.
 
@@ -118,7 +118,7 @@ ruff check .
 mypy src
 python -m build
 python scripts/build_skill.py --output-dir dist
-python scripts/package_audit.py dist/orbitdiff-skill-0.2.0.zip
+python scripts/package_audit.py dist/orbitdiff-skill-0.2.1.zip
 gh skill publish --dry-run .
 ```
 

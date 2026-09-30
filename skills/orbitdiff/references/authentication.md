@@ -15,3 +15,5 @@ The agent may use the human's supplied login handle for an authorized scan after
 The legacy CLI still supports `instaloader --login LOGIN_USERNAME` in a human terminal where that executable is available. Its `--session-file PATH` argument accepts a local path, never inline session material. Do not invent a path or search personal browser directories.
 
 If login is expired, challenged, or rate-limited, report the state and leave recovery to the human. Do not switch accounts, bypass private-profile restrictions, or retry automatically. `orbit-os doctor` checks local storage, not login validity.
+
+Only name an authentication problem when the observed result supports that diagnosis. The generic message `public following collection failed` does not identify a cause. Report it as an unknown provider failure and separate it from retained relationship evidence; do not claim that login expired or ask the human to reconnect speculatively.

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.1] - 2026-09-29
+
+- Preserve setup drafts, selected export files, and operation feedback through refresh and navigation. Restore keyboard focus after filtering and paging.
+- Bound local control requests and explain uncertain outcomes without automatically retrying an import or public scan.
+- Normalize corrupt compressed export errors without changing saved relationship evidence, and render report fields as plain text.
+- Reject Windows-style archive escapes and private directory ancestors in public distribution audits.
+- Improve the portable skill's runtime compatibility decisions, read-only inspection flow, and treatment of embedded data and unknown errors. Expand synthetic agent scenarios to exercise those boundaries.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
