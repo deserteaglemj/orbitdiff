@@ -53,6 +53,26 @@ ul { padding: 0; margin: 0; list-style: none; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
 .brand > span { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; line-height: 1; }
 .brand-os { font-weight: 300; color: #d1dccf; margin-left: 4px; }
+
+.setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.setup-card { padding: 28px; min-width: 0; }
+.setup-card h2 { margin: 16px 0 12px; font-size: 21px; }
+.setup-card p { color: var(--muted); line-height: 1.65; margin: 12px 0 20px; }
+.setup-card form { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
+.setup-card form > label { font-weight: 550; font-size: 13px; }
+.setup-card input:not([type="checkbox"]) { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface, #fff); color: inherit; font: inherit; }
+.setup-card input[type="file"] { font-size: 12px; }
+.setup-card .check-label { display: flex; align-items: flex-start; gap: 9px; line-height: 1.5; font-weight: 400; }
+.setup-card input[type="checkbox"] { margin-top: 3px; accent-color: #386047; }
+.setup-card .field-help, .setup-card .setup-footnote { font-size: 12px; margin: 0 0 12px; }
+.setup-card .setup-footnote { margin-top: 18px; }
+.setup-card .form-result { margin: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.session-help { margin: 20px 0; font-size: 13px; }
+.session-help summary { cursor: pointer; font-weight: 600; }
+.session-help pre { padding: 12px; background: var(--background, #f5f6f2); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.demo-banner { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; padding: 14px 18px; border: 1px solid #cfdec5; background: #edf3e8; border-radius: 8px; margin-bottom: 24px; font-size: 13px; }
+.demo-banner .button { margin-left: auto; }
+@media (max-width: 800px) { .setup-grid { grid-template-columns: minmax(0, 1fr); } .setup-card { padding: 22px; } }
 .workspace-label { color: var(--sidebar-muted); border-top: 1px solid #354039; margin: 34px 8px 16px; padding-top: 22px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
 .workspace-dot { height: 6px; width: 6px; border-radius: 50%; background: #bdd4a9; }
 .navigation { display: grid; gap: 6px; }
