@@ -2,10 +2,10 @@
 
 ## Candidate
 
-- [ ] Confirm the candidate is local only until publication is separately authorized.
+- [ ] Confirm publication authorization from the existing request or obtain it for a new scope.
 - [ ] Confirm `git status --short` is empty and record the local HEAD.
 - [ ] Review `CHANGELOG.md` for current-release impact statements.
-- [ ] Confirm no remote, tag, release, or publication action is included in this checklist.
+- [ ] Verify the release repository and selected commit before any remote action.
 
 ## Verification
 
@@ -13,9 +13,11 @@
 - [ ] `ruff check .`
 - [ ] `mypy src`
 - [ ] `python -m build`
-- [ ] `python scripts/package_audit.py dist/*`
+- [ ] `python scripts/build_skill.py --output-dir dist`
+- [ ] `python scripts/package_audit.py dist/*.whl dist/*.tar.gz dist/orbitdiff-skill-*.zip`
 - [ ] Install the wheel in a clean virtual environment.
-- [ ] Run `orbitdiff --help`, `orbitdiff doctor`, and `orbitdiff demo` from the clean environment.
+- [ ] Run both CLI version checks, doctor in an isolated workspace, and both offline demos from the clean environment.
+- [ ] Generate synthetic skill scenarios with `scripts/prepare_skill_evals.py`, run the skill and comparison, and retain the evaluation evidence outside public source.
 - [ ] `python scripts/public_safety_scan.py .`
 - [ ] `gh skill publish --dry-run .`
 - [ ] Verify every install command, URL, version, and expected demo output in `docs/prompt.md` matches the current release. The prompt is the first-run experience for most users.
@@ -29,6 +31,14 @@
 - [ ] Verify incomplete scans leave relationship state unchanged.
 - [ ] Verify events contain only target, public account ID, username, event type, times, and run reference.
 
+## Native app
+
+- [ ] Use the isolated pinned toolchain and explicit build inputs in `docs/desktop-build.md`.
+- [ ] Run `scripts/native_audit.py` against the app, including dependency licenses and file inventory.
+- [ ] Verify extracted launch without external Python, local import/demo, native CSV save, and shutdown.
+- [ ] Verify archive hashes, DMG contents, architecture, and platform signature.
+- [ ] Assess a quarantined copy without bypassing protections. State blocked installation and signing limits plainly.
+
 ## External publication
 
-Publication is not part of this checklist. A separately authorized publication run must re-verify source, remote ownership, tag, release artifact, and public readback.
+When publication is authorized, require passing CI, publish the reviewed commit and immutable version tag, attach only audited public artifacts and checksums, and verify remote readback plus a pinned skill installation. Do not describe a Mac developer preview as a notarized consumer installer.

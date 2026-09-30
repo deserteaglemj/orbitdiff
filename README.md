@@ -1,158 +1,129 @@
-# Orbit OS
+# Orbit OS and OrbitDiff
 
-**A private workspace for understanding your Instagram relationships.**
+**Your Instagram relationships, stored on your computer.**
 
-Orbit OS turns existing daily tracking into an interactive local app. Browse your own followers and following, see confirmed changes, search relationships, inspect the accounts you watch, and check the health of every collection source.
+Orbit OS combines your own followers/following export with separate public-account watchlists. Search relationships, inspect mutuals and unknown reciprocity, review changes, and export local reports. The OrbitDiff Agent Skill lets a local AI agent operate the same workspace. The standalone desktop app is a separate install.
 
-The personal graph and other-account following trackers stay separate. Profile follower counts are not presented as a complete named-follower roster. Hidden lists, pending changes, missing sources, stale data, and collection errors are explicit.
+| Workflow | Source | What a change means |
+| --- | --- | --- |
+| Your own followers and following | Your supplied Instagram JSON export | Observed between snapshots; refresh with another export |
+| Another account's public following | Explicit OrbitDiff scans | Confirmed after two matching complete observations |
 
-## Open the app
+No cloud account, telemetry, model API, automatic schedule, or account actions. Viewing, refreshing, reporting, and opening the app do not contact Instagram. Missing, partial, failed, and stale data remain explicit.
 
-Python 3.11 or later is the only app runtime requirement. No install, API key, cloud account, or package download is needed for the local workspace:
+## Install for an AI agent
 
-```bash
-PYTHONPATH=src python3 -m orbit_os --open
-```
+The canonical skill name is **`orbitdiff`**. It supports agents with local command execution and file access, including Codex, Claude Code, Cursor, GitHub Copilot, Gemini CLI, and other Agent Skills hosts. Chat-only agents cannot operate your machine through this skill.
 
-On macOS, double-click **Orbit OS.app** or **Orbit OS.command** in this checkout. The launcher opens a terminal and your browser. Leave that terminal running while using the app, and press Ctrl+C to stop it. A second launch reopens the running app.
+The skill and runtime install separately. Start with the complete [copy-paste setup prompt](docs/prompt.md), or follow the [installation reference](skills/orbitdiff/references/installation.md).
 
-The default address is `http://127.0.0.1:8767`. It is available only on this computer. This is a local browser app with a macOS launcher, not a hosted service or a native macOS client.
-
-Already installed the Python package? Use `orbit-os --open`. To inspect a separate collection home, use `--hermes-home PATH`. A different port can be selected with `--port 8768`.
-
-## Your workspace
-
-- **Overview:** profile counts, confirmed mutuals, relationship coverage, follower history, and recent changes.
-- **Relationships:** search and filter known relationships, including confirmed nonreciprocal relationships and unknown reciprocal status.
-- **Watchlist:** each watched account's observed following list, confirmed changes, pending observations, and list visibility.
-- **Activity:** a searchable timeline with source and date filters. Unattributed follower movement stays anonymous.
-- **System:** collection attempts, last successful data, existing schedules, coverage, and recovery guidance.
-
-**Refresh data** rereads existing local artifacts. It does not contact Instagram or run a collector. Existing Hermes schedules continue to own collection. Orbit OS adds no scheduled task, background daemon, notifications, account actions, or paid API usage.
-
-The app automatically reads the personal graph and following-watch artifacts in the local Hermes home. If they are missing, it shows the setup state. There are no sample accounts mixed into live views. See [the architecture and data contract](docs/orbit-os.md) for sources, privacy, and operating details.
-
-Personal artifacts remain outside the checkout. The app reads a verified private snapshot of the personal SQLite database, leaving the source files untouched. It never stores credentials, browser data, or API response bodies. It has no analytics and loads no remote fonts, avatars, or scripts. CSV exports are created only when requested in the interface.
-
-## OrbitDiff collection CLI
-
-Orbit OS is built on the [OrbitDiff repository](https://github.com/deserteaglemj/orbitdiff). The existing public-list collection CLI and portable skill remain available. The workspace app is an additional local interface; the following installation instructions refer to the published OrbitDiff CLI release.
-
-**Track who enters and leaves any public Instagram orbit.**
-
-OrbitDiff is a local-first CLI and Agent Skill for confirmed changes in a public Instagram following list. It stores a minimal SQLite history on your machine, requires two matching complete scans before reporting a change, and never asks for an Instagram password.
-
-![Synthetic OrbitDiff terminal demo](docs/demo.svg)
-
-## Start in 60 seconds: paste this into your AI agent
-
-Copy the block in [docs/prompt.md](docs/prompt.md) and paste it into Claude, Codex, GitHub Copilot, Cursor, Gemini CLI, OpenCode, or any other coding agent. The agent installs OrbitDiff, proves it works with the offline demo, walks you through the one-time Instagram session step you run yourself, and then asks for the first public username you want to track.
-
-Prefer to install by hand? Do this:
+Install version 0.2.0 from the [GitHub release](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.0):
 
 ```bash
-pipx install git+https://github.com/deserteaglemj/orbitdiff.git@v0.1.1
-orbitdiff demo
+pipx install git+https://github.com/deserteaglemj/orbitdiff.git@v0.2.0
+gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.2.0 --agent codex --scope user
 ```
 
-## Why OrbitDiff
-
-- **Local-first:** SQLite stays on your machine. No cloud account, telemetry, or remote database.
-- **Public-only:** private targets are rejected before following-list collection.
-- **Confirmed diffs:** incomplete scans fail closed and changes need two matching observations.
-
-If the demo fits your workflow, star the repository so other researchers can find it.
-
-## Install the Agent Skill
-
-OrbitDiff ships a portable skill for GitHub Copilot, Claude Code, Cursor, Codex, and Gemini CLI. It teaches agents the public-only boundary, saved-session safety, completeness rules, and pending versus confirmed changes.
+The v0.1.1 release does not include personal-export commands. To work from a verified source checkout instead:
 
 ```bash
-# Default GitHub Copilot host
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --scope user
-
-# Claude Code
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --agent claude-code --scope user
-
-# Cursor
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --agent cursor --scope user
-
-# Codex
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --agent codex --scope user
-
-# Gemini CLI
-gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --agent gemini-cli --scope user
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+.venv/bin/orbit-os --version
+.venv/bin/orbit-os demo
+gh skill install . orbitdiff --from-local --agent codex --scope user
 ```
 
-The commands use GitHub CLI's `--pin` option. Inspect the tag before installation if you need a source review.
+Use the agent host you actually run. GitHub CLI's skill installer is optional: extract the audited skill ZIP and copy the complete `orbitdiff` directory into your host's supported skill directory. Keep its references and assets.
 
-## Live workflow
+`orbit-os` and `orbitdiff` are both installed by the Python package. Python 3.11+ is required for this route. If pipx is unavailable, use the isolated environment above; on Windows its launchers are in `.venv/Scripts/`. No separate Instaloader install is needed for the built-in human login handoff.
 
-OrbitDiff tracks public following lists only. It does not access private profiles, DMs, posts, stories, contact data, or account actions. It is not affiliated with Instagram or Meta. Follow applicable terms and law.
+## Install the desktop app
 
-1. Check local readiness without contacting a target:
+The standalone **Orbit OS.app** candidate bundles Python, the interface, and the shared commands. It is independent of the Agent Skill and does not require an AI agent, source checkout, or separately installed Python.
 
-   ```bash
-   orbitdiff doctor
-   ```
+Use the separate app archive and checksum on the [release page](https://github.com/deserteaglemj/orbitdiff/releases/tag/v0.2.0). Extract it and move Orbit OS.app to an application folder. The app starts its own local server and owns its lifetime; it installs no startup item or daemon.
 
-2. Create a local Instaloader session in your own terminal. OrbitDiff never accepts a password, verification code, browser data, or raw session material:
+The initial desktop candidate targets **Apple Silicon macOS**. It uses ad-hoc signing and is **not Developer ID signed or notarized**. Gatekeeper rejected a quarantined copy during verification, so this download is a developer preview and requires proper signing before a normal consumer release. Do not disable platform protections. Windows, Linux, and other architectures remain unverified until their own builds and installation tests pass.
 
-   ```bash
-   instaloader --login YOUR_INSTAGRAM_USERNAME
-   ```
+The small `Orbit OS.app` launcher at the repository root is a source-checkout convenience. It is not the self-contained release bundle. Maintainers use the [desktop build script](scripts/build_desktop.py); platform and quarantine evidence accompanies each release candidate.
 
-3. Create a silent baseline for a public target:
+Technical users can also open the browser interface from an installed runtime:
 
-   ```bash
-   orbitdiff init atlas_studio --login LOGIN_USERNAME
-   ```
-
-4. Scan later and view confirmed events:
-
-   ```bash
-   orbitdiff scan atlas_studio --login LOGIN_USERNAME
-   orbitdiff status atlas_studio --json
-   orbitdiff report atlas_studio --format markdown
-   ```
-
-OrbitDiff enforces a 30-minute per-target cooldown for live scans. It stops on a missing session, private target, provider failure, rate limit, or incomplete list.
-
-## Pending versus confirmed
-
-Suppose `atlas_studio` follows `pixel_forge` in the baseline. A later complete scan sees `nova_labs` instead. Both observations are pending. If the next complete scan sees the same list, OrbitDiff confirms:
-
-```text
-following_stopped pixel_forge
-following_started nova_labs
+```bash
+orbit-os app --open
 ```
 
-A contradictory next scan clears the pending observation. A failed or below-95-percent collection leaves relationship state unchanged.
+It listens only on `127.0.0.1`. Close its terminal process to stop the browser server. `orbit-os app --desktop` needs the desktop extra; the bundled app includes it.
 
-## Command reference
+## Import your own relationships
 
-```text
-orbitdiff doctor [--data-dir PATH]
-orbitdiff init PUBLIC_TARGET --login LOGIN_USERNAME [--session-file PATH] [--data-dir PATH]
-orbitdiff scan PUBLIC_TARGET --login LOGIN_USERNAME [--session-file PATH] [--data-dir PATH]
-orbitdiff status PUBLIC_TARGET [--data-dir PATH] [--json]
-orbitdiff report PUBLIC_TARGET [--data-dir PATH] [--format json|markdown] [--output PATH]
-orbitdiff demo [--data-dir PATH]
+For the commands below, retain the executable from your installation: `orbit-os` for a PATH install, `.venv/bin/orbit-os` for the source environment, or `.venv/Scripts/orbit-os.exe` on Windows. The standalone Mac app's executable is inside its actual bundle, commonly `"/Applications/Orbit OS.app/Contents/MacOS/orbit-os"`. Substitute that full command prefix for `orbit-os`; the app adds no PATH command or separate `orbitdiff` executable.
+
+Supply your Instagram relationship export in JSON format as a folder or ZIP. Orbit OS reads recognized followers/following files only.
+
+```bash
+orbit-os import EXPORT_PATH --account atlas_studio
+orbit-os relationships --json
+orbit-os report --format json
 ```
 
-Exit codes: `0` success, `2` policy or saved-session error, `3` incomplete collection or cooldown, `4` local storage error.
+Use your own account handle. Add `--captured-at TIMESTAMP_WITH_TIMEZONE` only when the export capture time is known. Add `--complete-followers` and `--complete-following` only for directions you declare complete. These are recorded as user assertions, not independently verified completeness.
 
-## Development
+One follower shard does not prove a complete list. Missing directions preserve unknown reciprocity. Duplicate imports do not create new events, and older or undated imports do not displace a newer dated current snapshot. The importer rejects detectable owner-metadata, workspace-owner, and relationship-root conflicts; username-only export ownership remains your declaration. Such exports also cannot establish identity continuity across renames. See [personal import details](skills/orbitdiff/references/personal-exports.md).
+
+## Track a public following list
+
+Live collection needs a local session created by you in your own terminal:
+
+```bash
+orbit-os login LOGIN_USERNAME
+```
+
+Never send an agent your password, verification code, browser data, or session contents. Personal imports, demos, and reports require no login.
+
+Then establish a baseline for a public target:
+
+```bash
+orbit-os scan atlas_studio --login LOGIN_USERNAME --baseline
+orbit-os targets --json
+```
+
+At least 30 minutes after the previous attempt, an explicitly requested comparison can run:
+
+```bash
+orbit-os scan atlas_studio --login LOGIN_USERNAME
+orbit-os report --format json
+```
+
+A baseline is silent. One differing complete observation is pending. Another matching complete observation confirms `following_started` or `following_stopped`. Failed or incomplete collection preserves the last good relationship evidence. Initialization, failures, successes, and concurrent attempts share cooldown protection.
+
+Collection stops on private targets, count disagreement, rate limits, redirects, missing sessions, or resource bounds. Limits are 10,000 yielded accounts, 100 queries, one request attempt, a 20-second HTTP inactivity timeout, and a cooperative 120-second collection deadline. This is not a guarantee that a single continuously streaming request finishes within 120 seconds. No automatic retry loop is installed.
+
+## Existing OrbitDiff users
+
+The original `orbitdiff init`, `scan`, `status`, `report`, and offline `demo` remain available. New `targets --json`, `roster TARGET --json`, and `--version` commands make saved evidence discoverable.
+
+Orbit OS defaults to its own per-user application-data directory. The older OrbitDiff default directory is separate. To use an existing watchlist in Orbit OS, select that directory explicitly with `orbit-os app --workspace PATH`. Use the same path as `--data-dir PATH` in original OrbitDiff commands. Existing databases are preserved.
+
+The original local tracker integration is available only through explicit compatibility mode: `orbit-os app --hermes-home PATH`. It remains read-only and does not import those sources into a portable workspace. See the [architecture documentation](docs/orbit-os.md).
+
+For command contracts, JSON meanings, and exit codes, use the [command reference](skills/orbitdiff/references/commands.md). Exit code 0 from a read command is not proof of fresh data: inspect status, dates, coverage, and issues.
+
+## Development and distribution
 
 ```bash
 python -m pytest -q
 ruff check .
 mypy src
 python -m build
+python scripts/build_skill.py --output-dir dist
+python scripts/package_audit.py dist/orbitdiff-skill-0.2.0.zip
+gh skill publish --dry-run .
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [release checklist](docs/release-checklist.md).
+The skill ZIP uses a deterministic file allowlist, includes the MIT license, and has a SHA-256 sidecar. It contains instructions and assets, not the runtime or user data. Native packages have a separate audit and dependency-license inventory. Build and installation evidence must distinguish local candidates from published, signed releases.
 
-## License
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [release checklist](docs/release-checklist.md). Orbit OS is not affiliated with Instagram or Meta.
 
 MIT. See [LICENSE](LICENSE).

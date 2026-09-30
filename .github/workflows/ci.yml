@@ -31,8 +31,10 @@ jobs:
         run: python -m pytest -q
       - name: Build distributions
         run: python -m build
+      - name: Build portable skill
+        run: python scripts/build_skill.py --output-dir dist
       - name: Audit package contents
-        run: python scripts/package_audit.py dist/*
+        run: python scripts/package_audit.py dist/*.whl dist/*.tar.gz dist/orbitdiff-skill-*.zip
       - name: Audit dependencies
         run: python -m pip check
       - name: Public-safety scan
