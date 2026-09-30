@@ -25,7 +25,7 @@ class SessionUnavailableError(ProviderError):
 
 
 class CollectionIncompleteError(ProviderError):
-    """A collection failed the complete-list safety threshold."""
+    """A collection did not establish a complete public following list."""
 
 
 class FollowingProvider(Protocol):
@@ -39,17 +39,19 @@ def normalize_target(target: str) -> str:
     return normalized
 
 
-def validate_collection(collection: Collection, minimum_ratio: float = 0.95) -> None:
-    if not collection.complete:
+def validate_collection(collection: Collection) -> None:
+    if collection.complete is not True:
         raise CollectionIncompleteError("collection was not complete")
-    if collection.reported_count < 0:
-        raise CollectionIncompleteError("reported count cannot be negative")
+    if type(collection.reported_count) is not int or collection.reported_count < 0:
+        raise CollectionIncompleteError("reported count must be a nonnegative integer")
+    if any(not isinstance(account.profile_id, str) or not account.profile_id for account in collection.accounts):
+        raise CollectionIncompleteError("accounts require a stable public profile ID")
     unique_ids = {account.profile_id for account in collection.accounts}
     if len(unique_ids) != len(collection.accounts):
         raise CollectionIncompleteError("collection contains duplicate public profile IDs")
     if collection.reported_count > 0 and not collection.accounts:
         raise CollectionIncompleteError("reported nonzero following count collected an empty list")
-    if collection.reported_count and len(collection.accounts) / collection.reported_count < minimum_ratio:
+    if len(collection.accounts) != collection.reported_count:
         raise CollectionIncompleteError(
-            f"collection is below the {minimum_ratio:.0%} completeness threshold"
+            "collection count does not match the reported following count; the list is incomplete"
         )

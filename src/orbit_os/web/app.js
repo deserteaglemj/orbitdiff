@@ -1,7 +1,7 @@
 "use strict";
 
 const PAGE_SIZE = 25;
-const VIEW_NAMES = { overview: "Overview", relationships: "Relationships", watchlist: "Watchlist", activity: "Activity", system: "System" };
+const VIEW_NAMES = { overview: "Overview", relationships: "Relationships", watchlist: "Watchlist", activity: "Activity", setup: "Setup", system: "System" };
 const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   relationships: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m3 9v-2a6 6 0 0 0-3-5.2"/>',
@@ -97,6 +97,10 @@ function describeEvent(event = {}) {
   const anonymous = /unknown|unattributed|count_delta|balance/.test(type);
   if (anonymous) return { title: "Unattributed follower change", detail: `${numeric(event.delta) ? `Reported count changed by ${signed(event.delta)}. ` : "Reported count changed. "}No account can be identified from this count change.`, anonymous: true, tone: "neutral", icon: "activity" };
   const labels = {
+    follower_observed_added: ["Follower observed added", "Present in the newer personal export. This describes a difference between snapshots; username changes cannot be resolved from exports.", "ok", "plus"],
+    follower_observed_removed: ["Follower observed removed", "Absent in the newer declared-complete personal export. This is a snapshot observation; username changes cannot be resolved from exports.", "warning", "minus"],
+    following_observed_added: ["Following observed added", "Present in the newer personal export. This describes a difference between snapshots.", "ok", "plus"],
+    following_observed_removed: ["Following observed removed", "Absent in the newer declared-complete personal export. This describes a difference between snapshots.", "warning", "minus"],
     follower_started: ["Started following you", "Confirmed in the personal relationship graph.", "ok", "plus"],
     follower_stopped: ["Stopped following you", "Confirmed in the personal relationship graph.", "warning", "minus"],
     following_started: ["Following added", "Confirmed in the observed following list.", "ok", "plus"],
@@ -148,6 +152,9 @@ function pageHeading(title, description, actions = "", eyebrow = "YOUR WORKSPACE
 }
 
 function sourceBanner(source, personal = true) {
+  if (source.source === "instagram_export") {
+    return `<section class="status-banner" aria-label="Data status">${icon("clock", 18)}<div class="status-banner-copy"><strong>Personal export snapshot</strong><p>Captured ${h(formatDate(source.last_success_at, true))}. Refresh by importing a new export. Coverage is based on the files supplied and your completeness declaration, not a live Instagram check.</p></div><button type="button" class="button" data-go="setup">Import export</button></section>`;
+  }
   const info = statusInfo(source);
   if (info.tone === "ok") return "";
   const timestamp = personal ? source.last_success_at : source.last_run_at;
@@ -173,11 +180,12 @@ function watched() { return list(ui.data?.watchlist); }
 
 function personalStats() {
   const data = metrics();
+  const imported = personalData().source === "instagram_export";
   const items = [
-    ["Followers", data.followers, "Reported by the source", "relationships"],
-    ["Following", data.following, "Reported by the source", "arrow"],
-    ["Mutuals", data.mutuals, "Both directions confirmed", "link"],
-    ["Not following back", data.not_following_back, "Confirmed, not inferred", "question"],
+    ["Followers", data.followers, imported ? "In the declared complete export" : "Reported by the source", "relationships"],
+    ["Following", data.following, imported ? "In the declared complete export" : "Reported by the source", "arrow"],
+    ["Mutuals", data.mutuals, imported ? "Both directions in this export" : "Both directions confirmed", "link"],
+    ["Not following back", data.not_following_back, imported ? "Absent from complete followers export" : "Confirmed, not inferred", "question"],
   ];
   return `<section class="stats-strip" aria-label="Personal relationship totals">${items.map(([label, value, note, symbol]) => `<div class="stat"><div class="stat-label">${icon(symbol, 13)}${h(label)}</div><div class="stat-value">${h(count(value))}</div><div class="stat-foot">${h(note)}</div></div>`).join("")}</section>`;
 }
@@ -235,15 +243,18 @@ function eventItem(event, showSource = true) {
 
 function recentActivityPanel() {
   const events = allEvents().slice(0, 4);
-  return `<section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p class="section-subtitle">Changes with a clear source.</p></div><button class="button button-quiet" type="button" data-go="activity">View all ${icon("arrow", 14)}</button></div>${events.length ? `<ul class="activity-list">${events.map(event => eventItem(event)).join("")}</ul>` : emptyState("No recorded activity", "New confirmed changes will appear when your existing trackers record them.", "activity")}</section>`;
+  return `<section class="panel"><div class="panel-heading"><div><h2>Recent activity</h2><p class="section-subtitle">Changes with a clear source.</p></div><button class="button button-quiet" type="button" data-go="activity">View all ${icon("arrow", 14)}</button></div>${events.length ? `<ul class="activity-list">${events.map(event => eventItem(event)).join("")}</ul>` : emptyState("No recorded activity", "Changes appear after a later export import or a confirmed public scan.", "activity")}</section>`;
 }
 
 function watchlistPanel() {
-  return `<section class="panel"><div class="panel-heading"><div><h2>On your watchlist</h2><p class="section-subtitle">Other accounts, tracked separately.</p></div><span class="badge neutral">${watched().length} sources</span></div>${watched().length ? `<div class="source-list">${watched().map((source, index) => `<div class="source-row">${avatar(source)}<div class="source-row-copy"><strong>@${h(source.username || "Unknown")}</strong><p>${numeric(source.following_count) ? `${h(count(source.following_count))} following observed` : "Following count unavailable"}</p></div>${badge(source)}<button type="button" class="source-row-action" data-watch="${index}" aria-label="View @${h(source.username || "unknown")}">${icon("chevron", 14)}</button></div>`).join("")}</div><p class="panel-foot">Unavailable lists stay unknown. Removals require confirmation.</p>` : emptyState("No watchlist data", "No local following-watch sources were found.", "watchlist")}</section>`;
+  return `<section class="panel"><div class="panel-heading"><div><h2>On your watchlist</h2><p class="section-subtitle">Other accounts, tracked separately.</p></div><span class="badge neutral">${watched().length} sources</span></div>${watched().length ? `<div class="source-list">${watched().map((source, index) => `<div class="source-row">${avatar(source)}<div class="source-row-copy"><strong>@${h(source.username || "Unknown")}</strong><p>${numeric(source.following_count) ? `${h(count(source.following_count))} following observed` : "Following count unavailable"}</p></div>${badge(source)}<button type="button" class="source-row-action" data-watch="${index}" aria-label="View @${h(source.username || "unknown")}">${icon("chevron", 14)}</button></div>`).join("")}</div><p class="panel-foot">Unavailable lists stay unknown. Removals require confirmation.</p>` : emptyState("No watchlist data", "Add a public target in Setup to begin tracking its following list.", "watchlist")}</section>`;
 }
 
 function overviewView() {
   const personal = personalData();
+  if (ui.data?.workspace?.mode === "portable" && !personal.username && !watched().length) {
+    return `${pageHeading("Your orbit starts here.", "Two separate views. One private workspace.", `<button type="button" class="button button-light" data-demo="true">Explore the demo</button>`, "WELCOME TO ORBIT OS")}<div class="setup-grid"><section class="panel setup-card">${icon("relationships", 26)}<h2>Your relationships</h2><p>Import your Instagram followers and following export. Explore mutuals, unknowns, and changes between snapshots.</p><button type="button" class="button button-primary" data-go="setup">Import your export ${icon("arrow", 14)}</button><p class="setup-footnote">Your files stay on this device. No login is needed for imports.</p></section><section class="panel setup-card">${icon("watchlist", 26)}<h2>Public watchlists</h2><p>Track another public account’s following list. Every reported change needs two matching, complete observations.</p><button type="button" class="button" data-go="setup">Set up a watchlist ${icon("arrow", 14)}</button><p class="setup-footnote">Live scans use a session you create yourself in a local terminal.</p></section></div>`;
+  }
   return `${pageHeading("Your orbit, in focus.", "A clear view of the relationships around you.", "", "PERSONAL RELATIONSHIP INTELLIGENCE")}<div class="account-context overview-account"><span class="account-handle">${personal.username ? `@${h(personal.username)}` : "Personal graph"}</span><span class="context-divider"></span>${badge(personal)}<span class="muted small">Latest success ${h(relativeTime(personal.last_success_at))}</span></div>${sourceBanner(personal)}${personalStats()}<div class="overview-primary">${historyPanel()}${coveragePanel()}</div><div class="overview-secondary">${recentActivityPanel()}${watchlistPanel()}</div>`;
 }
 
@@ -280,7 +291,7 @@ function relationshipsView() {
   const filters = [["all", "All accounts"], ["mutual", "Mutuals"], ["following", "Following"], ["followers", "Followers"], ["not_following_back", "Not following back"], ["unknown", "Unconfirmed"]];
   const toolbar = `<div class="table-toolbar">${searchField("relationship-search", ui.relationships.query, "Search accounts or names")}<div class="toolbar-group"><label class="sr-only" for="relationship-sort">Sort relationships</label><select id="relationship-sort"><option value="username" ${ui.relationships.sort === "username" ? "selected" : ""}>Username A–Z</option><option value="recent" ${ui.relationships.sort === "recent" ? "selected" : ""}>Recently observed</option></select><span class="small muted">${h(count(accounts.length))} results</span></div></div><div class="filter-tabs" aria-label="Filter relationships">${filters.map(([key, label]) => `<button type="button" class="filter-tab" data-relationship-filter="${key}" aria-pressed="${ui.relationships.filter === key}">${label}</button>`).join("")}</div>`;
   const body = result.rows.length ? `<div class="table-scroll" tabindex="0" aria-label="Relationship table, scroll for more columns"><table><thead><tr><th scope="col">Account</th><th scope="col">Relationship</th><th scope="col">You follow</th><th scope="col">Follows you</th><th scope="col">Last observed</th><th scope="col"><span class="sr-only">Profile</span></th></tr></thead><tbody>${result.rows.map(account => `<tr><td>${accountCell(account)}</td><td>${relationshipLabel(account.relationship)}</td><td>${truth(account.following)}</td><td>${truth(account.followed_by)}</td><td class="muted">${h(formatDate(account.updated_at))}</td><td>${externalLink(account.username)}</td></tr>`).join("")}</tbody></table></div>` : emptyState("No matching relationships", accounts.length === 0 && (ui.relationships.query || ui.relationships.filter !== "all") ? "Try a different search or choose All accounts." : "This personal source has not recorded any account-level relationships yet.", "relationships");
-  return `${pageHeading("Relationships", "Your personal graph, with confirmed and unknown relationships kept distinct.", `<button type="button" class="button button-light" data-export="relationships" ${accounts.length ? "" : "disabled"}>${icon("download", 14)}Export CSV</button>`)}${sourceBanner(personalData())}<section class="panel">${toolbar}${body}${pagination(result, "relationships")}<p class="table-note">“Not following back” requires a confirmed negative observation. Unknown reciprocity remains unconfirmed. Profile links open Instagram in a new tab.</p></section>`;
+  return `${pageHeading("Relationships", "Your personal graph, with evidence and unknowns kept distinct.", `<button type="button" class="button button-light" data-export="relationships" ${accounts.length ? "" : "disabled"}>${icon("download", 14)}Export CSV</button>`)}${sourceBanner(personalData())}<section class="panel">${toolbar}${body}${pagination(result, "relationships")}<p class="table-note">${personalData().source === "instagram_export" ? "Absence is interpreted only for directions you declared complete in a dated export. Export usernames do not prove stable account identity." : "“Not following back” requires a confirmed negative observation."} Unknown reciprocity remains unknown. Profile links open Instagram in a new tab.</p></section>`;
 }
 
 function currentWatch() { return watched()[Math.max(0, Math.min(ui.watchlist.selected, watched().length - 1))] || {}; }
@@ -295,7 +306,7 @@ function watchAccountTable(source) {
 }
 
 function watchlistView() {
-  const heading = pageHeading("Watchlist", "Public following lists from other accounts, each with its own evidence and history.");
+  const heading = pageHeading("Watchlist", "Public following lists from other accounts, each with its own evidence and history.", ui.data?.workspace?.can_scan ? '<button type="button" class="button button-primary" data-go="setup">Add or scan a target</button>' : "");
   if (!watched().length) return `${heading}<section class="panel">${emptyState("No local watchlist sources", "Your existing following trackers will appear here when local artifacts are available.", "watchlist")}</section>`;
   const source = currentWatch();
   const pending = numeric(source.pending_count) ? source.pending_count : list(source.pending_removals).length || null;
@@ -355,6 +366,12 @@ function systemView() {
   return `${pageHeading("System", "Collection health, data coverage, and the local systems behind your workspace.")}${notice}<div class="system-grid"><section class="panel"><div class="panel-heading"><h2>Source health</h2><span class="badge neutral">${sourceHealth.length} sources</span></div><div class="system-body">${sourceSystemCard(personalData(), true)}${watched().map(source => sourceSystemCard(source)).join("")}</div></section><section class="panel"><div class="panel-heading"><h2>Private by default</h2>${icon("shield", 18)}</div><div class="system-body"><div class="fact-row"><span>Storage</span><strong>This device only</strong></div><div class="fact-row"><span>Account access</span><strong>Read-only</strong></div><div class="fact-row"><span>Cloud sync</span><strong>None</strong></div><div class="fact-row"><span>Latest local refresh</span><strong>${h(formatDate(ui.data?.generated_at, true))}</strong></div><p class="system-guidance"><strong>Refresh data</strong> rereads local artifacts. It does not sign in, contact Instagram, run collection, or change existing schedules.</p><p class="system-guidance"><strong>When a source fails:</strong> keep the existing observations, review the tracker’s recovery guidance, and resolve its underlying collection problem before retrying. A hidden list never becomes zero.</p>${issueMarkup(ui.data?.issues)}</div></section></div><section class="panel"><div class="panel-heading"><div><h2>Existing schedules</h2><p class="section-subtitle">Status from your tracker jobs. Orbit does not modify them.</p></div></div><div class="schedule-table">${scheduleTable}</div><p class="table-note">Times are displayed in this browser’s local timezone. Schedule expressions are shown exactly as recorded by the source.</p></section>`;
 }
 
+function setupView() {
+  const mode = ui.data?.workspace?.mode;
+  if (mode !== "portable") return `${pageHeading("Setup", mode === "demo" ? "You are exploring synthetic data." : "This is a read-only compatibility workspace.")}<section class="panel setup-card"><p>${mode === "demo" ? "Exit the demo to import your own export or create a public watchlist." : "Imports and public scans use the portable workspace. The selected compatibility sources remain unchanged."}</p>${mode === "demo" ? '<button class="button button-primary" type="button" data-exit-demo="true">Open my workspace</button>' : ""}</section>`;
+  return `${pageHeading("Make it your workspace.", "Personal exports and public watchlists have independent setup and history.", '<button type="button" class="button button-light" data-demo="true">Try the demo</button>', "SETUP")}<div class="setup-grid"><section class="panel setup-card"><h2>Import your relationships</h2><p>Request your Instagram information in <strong>JSON</strong> format with <strong>All time</strong> and <strong>Followers and following</strong> selected. Choose the ZIP, or all followers and following JSON files together.</p><form id="import-form"><label for="import-account">Your Instagram username</label><input id="import-account" name="account" required maxlength="30" autocomplete="off" value="${h(personalData().username || "")}" placeholder="your_username"><label for="import-files">Relationship export</label><input id="import-files" type="file" accept=".zip,.json" multiple required><label for="import-captured">Export capture time <span class="muted">(optional)</span></label><input id="import-captured" type="datetime-local"><p class="field-help">Use the export’s capture time, not the date you followed someone. Leave it blank if unknown.</p><label class="check-label"><input id="complete-followers" type="checkbox">I included every followers file from an all-time export.</label><label class="check-label"><input id="complete-following" type="checkbox">I included the complete following list from that export.</label><p class="field-help">These are your declarations. Without a known capture time and complete files, missing relationships remain unknown.</p><button class="button button-primary" type="submit">Import locally</button><p class="form-result" id="import-result" role="status" aria-live="polite"></p></form></section><section class="panel setup-card"><h2>Track a public following list</h2><p>First create your own local session. Orbit never asks for passwords or verification codes in this window or in agent chat.</p><details class="session-help"><summary>One-time session setup</summary><p>In your own terminal, run:</p><pre><code>orbit-os login YOUR_USERNAME</code></pre><p>Using the standalone Mac app? Run its bundled command instead:</p><pre><code>"/Applications/Orbit OS.app/Contents/MacOS/orbit-os" login YOUR_USERNAME</code></pre><p>Complete the provider’s prompts yourself, then return here. This setup needs no separate Python installation when using the app bundle.</p></details><form id="scan-form"><label for="scan-target">Public target username</label><input id="scan-target" name="target" required maxlength="30" autocomplete="off" placeholder="public_username"><label for="scan-login">Your session’s login username</label><input id="scan-login" name="login" required maxlength="30" autocomplete="off" placeholder="your_username"><label class="check-label"><input id="scan-baseline" type="checkbox">Create this target’s first baseline.</label><p class="field-help">This button contacts Instagram. Baselines are silent; changes need two complete observations. Every attempt starts a 30-minute cooldown. Stop after a rate limit or session challenge.</p><button class="button button-primary" type="submit">Run one public scan</button><p class="form-result" id="scan-result" role="status" aria-live="polite"></p></form></section></div>`;
+}
+
 function render() {
   if (typeof document === "undefined") return;
   const main = document.getElementById("main-content");
@@ -366,8 +383,8 @@ function render() {
     if (ui.error) main.innerHTML = `<div class="loading-state"><h1 id="page-title">Your workspace is unavailable</h1><p>${h(ui.error)}</p><button class="button button-primary" type="button" data-retry="true">Try again</button></div>`;
     return;
   }
-  const views = { overview: overviewView, relationships: relationshipsView, watchlist: watchlistView, activity: activityView, system: systemView };
-  main.innerHTML = views[ui.view]();
+  const views = { overview: overviewView, relationships: relationshipsView, watchlist: watchlistView, activity: activityView, setup: setupView, system: systemView };
+  main.innerHTML = `${ui.data?.workspace?.demo ? '<div class="demo-banner"><strong>Synthetic demo</strong><span>This data is isolated from your workspace.</span><button type="button" class="button" data-exit-demo="true">Exit demo</button></div>' : ""}${views[ui.view]()}`;
   document.title = `${VIEW_NAMES[ui.view]} | Orbit OS`;
   document.getElementById("current-view").textContent = VIEW_NAMES[ui.view];
   document.querySelectorAll("[data-view]").forEach(link => {
@@ -396,7 +413,7 @@ function announce(message) {
   announce.timer = setTimeout(() => { toast.hidden = true; }, 4500);
 }
 
-async function loadState() {
+async function loadState(demo = false) {
   if (ui.loading) return;
   ui.loading = true;
   const button = document.getElementById("refresh-data");
@@ -407,14 +424,14 @@ async function loadState() {
   const timer = setTimeout(() => controller.abort(), 15000);
   const hadData = Boolean(ui.data);
   try {
-    const response = await fetch("/api/state", { cache: "no-store", credentials: "omit", signal: controller.signal, headers: { Accept: "application/json" } });
+    const response = await fetch(demo ? "/api/demo" : "/api/state", { cache: "no-store", credentials: "omit", signal: controller.signal, headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error("The local server could not read your workspace. Check that Orbit OS is still running, then try again.");
     const data = await response.json();
     if (!data || data.schema_version !== 1 || typeof data !== "object") throw new Error("The local data format is not supported by this version of Orbit OS.");
     ui.data = data;
     ui.error = "";
     document.getElementById("app-notice").hidden = true;
-    if (hadData) announce("Local data refreshed. No collection was started.");
+    if (hadData) announce(demo ? "Synthetic demo opened. Your workspace is unchanged." : "Local data refreshed. No collection was started.");
   } catch (error) {
     ui.error = error.name === "AbortError" ? "The local server took too long to respond. Check that Orbit OS is running, then try again." : error.message === "Failed to fetch" ? "The local server is unavailable. Start Orbit OS again and refresh this page." : error.message || "The local workspace could not be read.";
     if (ui.data) {
@@ -492,8 +509,59 @@ function handleClick(event) {
     ui.activity.source = "watchlist";
     ui.activity.page = 1;
     navigate("activity");
-  } else if (target.dataset.export) exportCSV(target.dataset.export);
+  } else if (target.dataset.demo) { ui.view = "overview"; loadState(true); }
+  else if (target.dataset.exitDemo) { ui.view = "overview"; loadState(false); }
+  else if (target.dataset.export) exportCSV(target.dataset.export);
   else if (target.dataset.retry || target.id === "refresh-data") loadState();
+}
+
+function encodedFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected file could not be read."));
+    reader.onload = () => resolve({ name: file.name, content: String(reader.result).split(",")[1] });
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleSubmit(event) {
+  const form = event.target;
+  if (!['import-form', 'scan-form'].includes(form.id)) return;
+  event.preventDefault();
+  const importing = form.id === "import-form";
+  const status = document.getElementById(importing ? "import-result" : "scan-result");
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  status.textContent = importing ? "Reading your selected export…" : "Running one public scan. Keep this window open…";
+  let successMessage = "";
+  try {
+    let payload;
+    if (importing) {
+      const chosen = [...document.getElementById("import-files").files];
+      if (!chosen.length || chosen.length > 256 || chosen.reduce((total, file) => total + file.size, 0) > 28 * 1024 * 1024) throw new Error("Choose a ZIP or relationship JSON files totaling at most 28 MB.");
+      const captured = document.getElementById("import-captured").value;
+      payload = { account: document.getElementById("import-account").value.trim(), captured_at: captured ? new Date(captured).toISOString() : null,
+        complete_followers: document.getElementById("complete-followers").checked, complete_following: document.getElementById("complete-following").checked,
+        files: await Promise.all(chosen.map(encodedFile)) };
+    } else {
+      payload = { target: document.getElementById("scan-target").value.trim(), login: document.getElementById("scan-login").value.trim(), baseline: document.getElementById("scan-baseline").checked };
+    }
+    const sessionResponse = await fetch("/api/session", { cache: "no-store", credentials: "omit" });
+    if (!sessionResponse.ok) throw new Error("Reopen Orbit OS before trying again.");
+    const session = await sessionResponse.json();
+    const response = await fetch(importing ? "/api/import" : "/api/scan", { method: "POST", credentials: "omit", headers: { "Content-Type": "application/json", "X-Orbit-Token": session.token }, body: JSON.stringify(payload) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The operation could not be completed safely.");
+    if (!result.ok) throw new Error(result.message || "The scan stopped. Check your local session and wait before retrying.");
+    successMessage = importing ? (result.import_result.duplicate ? "This export was already imported." : "Your export was imported locally.") : result.message;
+    if (importing) ui.view = "relationships";
+    await loadState();
+    announce(successMessage);
+  } catch (error) {
+    status.textContent = error.message || "The local operation did not finish. Reopen Orbit OS and check your workspace.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function handleInput(event) {
@@ -522,6 +590,7 @@ function initialize() {
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleChange);
+  document.addEventListener("submit", handleSubmit);
   window.addEventListener("hashchange", () => navigate(location.hash.slice(1)));
   let resizeTimer;
   window.addEventListener("resize", () => {

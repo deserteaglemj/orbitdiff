@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
+
+import pytest
 
 from orbitdiff import cli, paths
 from orbitdiff.models import Account, Collection
+from orbitdiff.providers.base import ProviderError
 
 
 class SequenceProvider:
@@ -84,10 +89,10 @@ def test_init_is_silent_and_scan_prints_only_confirmed_changes(
 
     assert cli.main(["init", *base_args]) == 0
     assert capsys.readouterr().out == ""  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli, "COOLDOWN", timedelta(0))  # type: ignore[attr-defined]
     assert cli.main(["scan", *base_args]) == 0
     assert capsys.readouterr().out == ""  # type: ignore[attr-defined]
 
-    monkeypatch.setattr(cli, "_cooldown_active", lambda *_args: False)  # type: ignore[attr-defined]
     assert cli.main(["scan", *base_args]) == 0
     assert "following_started" in capsys.readouterr().out  # type: ignore[attr-defined]
 
@@ -168,15 +173,132 @@ def test_demo_and_report_write_failures_return_redacted_exit_code_four(
     assert "/private" not in errors
 
 
-def test_status_returns_four_for_locked_database(tmp_path: Path, capsys: object) -> None:
+def test_status_reads_committed_snapshot_during_writer_lock(tmp_path: Path, capsys: object) -> None:
     database = tmp_path / "orbitdiff.sqlite3"
     cli._store(tmp_path).initialize()  # type: ignore[attr-defined]
     connection = sqlite3.connect(database, timeout=0)
     connection.execute("BEGIN EXCLUSIVE")
     try:
-        assert cli.main(["status", "atlas_studio", "--data-dir", str(tmp_path)]) == 4
+        assert cli.main(["status", "atlas_studio", "--data-dir", str(tmp_path), "--json"]) == 0
     finally:
         connection.rollback()
         connection.close()
 
-    assert "storage failed" in capsys.readouterr().err  # type: ignore[attr-defined]
+    output = capsys.readouterr()  # type: ignore[attr-defined]
+    assert output.err == ""
+    assert json.loads(output.out)["confirmed_count"] is None
+
+
+def test_uninitialized_status_text_preserves_unknown_counts(tmp_path: Path, capsys: object) -> None:
+    cli._store(tmp_path).record_failed_run("atlas_studio", "session unavailable")
+    assert cli.main(["status", "atlas_studio", "--data-dir", str(tmp_path)]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "unknown confirmed" in output
+    assert "failed" in output
+
+
+def test_reinitializing_an_existing_target_never_collects_or_advances_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = cli._store(tmp_path)
+    previous = collection({"1": "pixel_forge"})
+    previous = Collection(target=previous.target, reported_count=1, accounts=previous.accounts,
+                          complete=True, collected_at=datetime.now(UTC) - timedelta(hours=1))
+    store.apply_collection(previous, baseline_run=True)
+
+    def forbidden_provider(_args: object) -> None:
+        pytest.fail("An existing baseline must not collect again through init")
+
+    monkeypatch.setattr(cli, "_make_live_provider", forbidden_provider)
+    assert cli.main(["init", "atlas_studio", "--login", "analyst", "--data-dir", str(tmp_path)]) == 2
+    assert "already" in capsys.readouterr().err
+    assert store.events("atlas_studio") == []
+    assert store.status("atlas_studio")["confirmed_count"] == 1
+
+
+@pytest.mark.parametrize("first,second", [("init", "init"), ("init", "scan"), ("scan", "init")])
+def test_initialization_and_scan_share_cooldown_before_provider_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first: str, second: str
+) -> None:
+    calls: list[str] = []
+
+    def provider(_args: object) -> SequenceProvider:
+        calls.append("created")
+        return SequenceProvider([collection({"1": "pixel_forge"})])
+
+    monkeypatch.setattr(cli, "_make_live_provider", provider)
+    common = ["atlas_studio", "--login", "analyst", "--data-dir", str(tmp_path)]
+    assert cli.main([first, *common]) == 0
+    assert cli.main([second, *common]) == 3
+    assert calls == ["created"]
+
+
+def test_failed_live_attempt_keeps_cooldown_and_relationship_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline = collection({"1": "pixel_forge"})
+    baseline = Collection(
+        target=baseline.target, reported_count=1, accounts=baseline.accounts, complete=True,
+        collected_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    store = cli._store(tmp_path)
+    store.apply_collection(baseline)
+    calls: list[str] = []
+
+    class FailingProvider:
+        def collect(self, _target: str) -> Collection:
+            calls.append("collected")
+            raise ProviderError("public following collection failed")
+
+    monkeypatch.setattr(cli, "_make_live_provider", lambda _args: FailingProvider())
+    common = ["atlas_studio", "--login", "analyst", "--data-dir", str(tmp_path)]
+    assert cli.main(["scan", *common]) == 3
+    assert cli.main(["init", *common]) == 3
+    assert calls == ["collected"]
+    assert "cooldown" in capsys.readouterr().err
+    assert store.status("atlas_studio")["confirmed_count"] == 1
+    assert store.status("atlas_studio")["pending_count"] == 0
+    assert store.events("atlas_studio") == []
+
+
+def test_targets_roster_and_version_are_discoverable_without_collection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = cli._store(tmp_path)
+    store.apply_collection(collection({"1": "pixel_forge"}))
+    assert cli.main(["targets", "--data-dir", str(tmp_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)[0]["target"] == "atlas_studio"
+    assert cli.main(["roster", "atlas_studio", "--data-dir", str(tmp_path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["target"] == "atlas_studio"
+    assert payload["accounts"][0]["username"] == "pixel_forge"
+    with pytest.raises(SystemExit) as result:
+        cli.main(["--version"])
+    assert result.value.code == 0
+    assert capsys.readouterr().out.startswith("OrbitDiff ")
+
+
+def test_second_live_command_cannot_collect_while_first_is_in_flight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started, release = Event(), Event()
+    calls: list[str] = []
+
+    class WaitingProvider:
+        def collect(self, _target: str) -> Collection:
+            calls.append("collect")
+            started.set()
+            assert release.wait(timeout=5)
+            return collection({"1": "pixel_forge"})
+
+    monkeypatch.setattr(cli, "_make_live_provider", lambda _args: WaitingProvider())
+    common = ["atlas_studio", "--login", "analyst", "--data-dir", str(tmp_path)]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(cli.main, ["init", *common])
+        try:
+            assert started.wait(timeout=5)
+            assert cli.main(["scan", *common]) == 3
+        finally:
+            release.set()
+        assert first.result(timeout=5) == 0
+    assert calls == ["collect"]

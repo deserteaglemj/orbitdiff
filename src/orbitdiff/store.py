@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
+
+from orbit_os.data import _snapshot_connection
 
 from .diff import EdgeState, reconcile
 from .models import Account, Collection, Event
+from .paths import ensure_private_directory, validate_database_path
+from .providers.base import validate_collection
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -16,6 +24,10 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 CREATE TABLE IF NOT EXISTS targets (
     target TEXT PRIMARY KEY,
     initialized_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS live_attempts (
+    target TEXT PRIMARY KEY,
+    attempted_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS accounts (
     profile_id TEXT PRIMARY KEY,
@@ -54,24 +66,52 @@ CREATE TABLE IF NOT EXISTS events (
 """
 
 
+def _attempt_time(value: str) -> datetime | None:
+    """Legacy failed runs use SQLite's UTC datetime('now') representation."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value):
+            return None
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 class GraphStore:
     def __init__(self, path: Path) -> None:
         self.path = path
 
     def initialize(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if os.name != "nt":
-            self.path.parent.chmod(0o700)
         with self._connection() as connection:
             connection.executescript(_SCHEMA)
             connection.execute("INSERT OR IGNORE INTO schema_meta(version) VALUES (1)")
-        if os.name != "nt" and self.path.exists():
-            self.path.chmod(0o600)
+            connection.commit()
+
+    def _prepare_database(self) -> Path:
+        path = validate_database_path(self.path)
+        ensure_private_directory(path.parent)
+        validate_database_path(path)
+        flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        try:
+            descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            descriptor = os.open(path, flags)
+        try:
+            status = os.fstat(descriptor)
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+                raise OSError("database must be a regular file without links")
+            if os.name != "nt":
+                os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        return validate_database_path(path)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        path = self._prepare_database()
+        connection = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
@@ -80,9 +120,101 @@ class GraphStore:
         finally:
             connection.close()
 
+    @contextmanager
+    def _read_connection(self) -> Iterator[sqlite3.Connection | None]:
+        path = validate_database_path(self.path)
+        if not path.exists():
+            yield None
+            return
+        with _snapshot_connection(path.parent, path) as connection:
+            yield connection
+
+    def reserve_live_attempt(
+        self, target: str, *, now: datetime | None = None,
+        cooldown: timedelta = timedelta(minutes=30),
+    ) -> bool:
+        """Commit a cooldown reservation before any live provider can be called.
+
+        The reservation survives failed or interrupted collectors. Existing
+        baseline and failed-run history also counts when upgrading old stores.
+        """
+        current = now or datetime.now(UTC)
+        if current.tzinfo is None or cooldown < timedelta(0):
+            raise ValueError("an aware attempt time and nonnegative cooldown are required")
+        current = current.astimezone(UTC)
+        self.initialize()
+        with self._connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                timestamps = self._attempt_timestamps(connection, target)
+                for value in timestamps:
+                    previous = _attempt_time(value)
+                    # Unknown dates must not accidentally permit a rapid retry.
+                    if previous is None or current - previous < cooldown:
+                        connection.rollback()
+                        return False
+                connection.execute(
+                    """INSERT INTO live_attempts(target, attempted_at) VALUES (?, ?)
+                    ON CONFLICT(target) DO UPDATE SET attempted_at = excluded.attempted_at""",
+                    (target, current.isoformat()),
+                )
+                connection.commit()
+                return True
+            except BaseException:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _attempt_timestamps(connection: sqlite3.Connection, target: str) -> list[str]:
+        rows = connection.execute(
+            """SELECT collected_at AS attempted_at FROM runs WHERE target = ?
+            ORDER BY julianday(collected_at) DESC, id DESC LIMIT 1""",
+            (target,),
+        ).fetchall()
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'live_attempts'"
+        ).fetchone():
+            rows += connection.execute(
+                "SELECT attempted_at FROM live_attempts WHERE target = ?", (target,),
+            ).fetchall()
+        return [str(row["attempted_at"]) for row in rows]
+
+    def targets(self) -> list[dict[str, Any]]:
+        """Discover stored targets without creating or migrating the source."""
+        with self._read_connection() as connection:
+            if connection is None:
+                return []
+            query = "SELECT target FROM targets UNION SELECT target FROM runs"
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'live_attempts'"
+            ).fetchone():
+                query += " UNION SELECT target FROM live_attempts"
+            rows = connection.execute(query + " ORDER BY target").fetchall()
+            return [self._target_status(connection, str(row["target"])) for row in rows]
+
+    def roster(self, target: str) -> list[dict[str, Any]]:
+        """Read both confirmation and latest observation for every known edge."""
+        with self._read_connection() as connection:
+            if connection is None:
+                return []
+            rows = connection.execute(
+                """SELECT e.actor_id, a.username, e.confirmed_present,
+                e.pending_present, e.pending_first_seen_at FROM edges AS e
+                JOIN accounts AS a ON a.profile_id = e.actor_id
+                WHERE e.target = ? ORDER BY a.username, e.actor_id""", (target,),
+            ).fetchall()
+        return [{
+            "profile_id": str(row["actor_id"]), "username": str(row["username"]),
+            "confirmed_present": bool(row["confirmed_present"]),
+            "observed_present": bool(row["confirmed_present"] if row["pending_present"] is None else row["pending_present"]),
+            "pending_present": None if row["pending_present"] is None else bool(row["pending_present"]),
+            "pending_first_seen_at": row["pending_first_seen_at"],
+        } for row in rows]
+
     def apply_collection(self, collection: Collection, *, baseline_run: bool = False) -> list[Event]:
         if not collection.complete:
             raise ValueError("incomplete collections cannot change graph state")
+        validate_collection(collection)
         self.initialize()
         collected_at = collection.collected_at.isoformat()
         unique_accounts = {account.profile_id: account for account in collection.accounts}
@@ -95,6 +227,9 @@ class GraphStore:
                 target_row = connection.execute(
                     "SELECT target FROM targets WHERE target = ?", (collection.target,)
                 ).fetchone()
+                if baseline_run and target_row is not None:
+                    connection.rollback()
+                    return []
                 cursor = connection.execute(
                     """INSERT INTO runs(target, state, run_kind, collected_at, reported_count, collected_count)
                     VALUES (?, 'success', ?, ?, ?, ?)""",
@@ -227,38 +362,76 @@ class GraphStore:
             run_id=run_id,
         )
 
-    def record_failed_run(self, target: str, error: str) -> None:
+    def record_failed_run(self, target: str, error: str, *, baseline_run: bool = False) -> None:
         self.initialize()
         with self._connection() as connection:
             connection.execute(
                 """INSERT INTO runs(target, state, run_kind, collected_at, error)
-                VALUES (?, 'failed', 'scan', datetime('now'), ?)""",
-                (target, error),
+                VALUES (?, 'failed', ?, ?, ?)""",
+                (target, "baseline" if baseline_run else "scan", datetime.now(UTC).isoformat(), error),
             )
             connection.commit()
 
-    def status(self, target: str) -> dict[str, int | str]:
-        self.initialize()
-        with self._connection() as connection:
+    @staticmethod
+    def _target_status(connection: sqlite3.Connection | None, target: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "target": target, "initialized": False, "observation_status": "missing",
+            "confirmed_count": None, "pending_count": None, "failed_runs": 0,
+            "initialized_at": None, "last_success_at": None, "last_attempt_at": None,
+        }
+        if connection is None:
+            return result
+        target_row = connection.execute(
+            "SELECT initialized_at FROM targets WHERE target = ?", (target,),
+        ).fetchone()
+        latest = connection.execute(
+            "SELECT state, collected_at FROM runs WHERE target = ? ORDER BY id DESC LIMIT 1",
+            (target,),
+        ).fetchone()
+        good = connection.execute(
+            "SELECT collected_at FROM runs WHERE target = ? AND state = 'success' ORDER BY id DESC LIMIT 1",
+            (target,),
+        ).fetchone()
+        initialized = target_row is not None and good is not None
+        result["initialized"] = initialized
+        if initialized:
             confirmed_count = connection.execute(
                 "SELECT COUNT(*) FROM edges WHERE target = ? AND confirmed_present = 1", (target,)
             ).fetchone()[0]
             pending_count = connection.execute(
                 "SELECT COUNT(*) FROM edges WHERE target = ? AND pending_present IS NOT NULL", (target,)
             ).fetchone()[0]
-            failed_runs = connection.execute(
-                "SELECT COUNT(*) FROM runs WHERE target = ? AND state = 'failed'", (target,)
-            ).fetchone()[0]
-        return {
-            "target": target,
-            "confirmed_count": int(confirmed_count),
-            "pending_count": int(pending_count),
-            "failed_runs": int(failed_runs),
-        }
+            result.update(
+                confirmed_count=int(confirmed_count), pending_count=int(pending_count),
+                initialized_at=str(target_row["initialized_at"]),
+                last_success_at=str(good["collected_at"]), observation_status="observed",
+            )
+        result["failed_runs"] = int(connection.execute(
+            "SELECT COUNT(*) FROM runs WHERE target = ? AND state = 'failed'", (target,),
+        ).fetchone()[0])
+        if latest is not None and latest["state"] == "failed":
+            result["observation_status"] = "failed"
+        attempts = [
+            value for timestamp in GraphStore._attempt_timestamps(connection, target)
+            if (value := _attempt_time(timestamp)) is not None
+        ]
+        if attempts:
+            last_attempt = max(attempts)
+            result["last_attempt_at"] = last_attempt.isoformat()
+            latest_time = _attempt_time(str(latest["collected_at"])) if latest is not None else None
+            if latest_time is None or last_attempt > latest_time:
+                result["observation_status"] = "pending"
+        return result
+
+    def status(self, target: str) -> dict[str, Any]:
+        """Read stored status, keeping never-observed relationship counts unknown."""
+        with self._read_connection() as connection:
+            return self._target_status(connection, target)
 
     def last_live_scan_at(self, target: str) -> str | None:
-        self.initialize()
-        with self._connection() as connection:
+        with self._read_connection() as connection:
+            if connection is None:
+                return None
             row = connection.execute(
                 """SELECT collected_at FROM runs WHERE target = ? AND state = 'success' AND run_kind = 'scan'
                 ORDER BY id DESC LIMIT 1""",
@@ -267,8 +440,9 @@ class GraphStore:
         return None if row is None else str(row["collected_at"])
 
     def events(self, target: str) -> list[Event]:
-        self.initialize()
-        with self._connection() as connection:
+        with self._read_connection() as connection:
+            if connection is None:
+                return []
             rows = connection.execute(
                 """SELECT event_type, target, actor_id, username, first_seen_at, confirmed_at, run_id
                 FROM events WHERE target = ? ORDER BY id""",

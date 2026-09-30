@@ -55,6 +55,14 @@ def test_lost_mutual_event_does_not_claim_an_unfollow() -> None:
     assert "does not establish" in event["detail"].lower()
 
 
+def test_export_removal_is_an_observation_not_a_confirmed_live_unfollow() -> None:
+    event = evaluate("app.describeEvent({type: 'follower_observed_removed', source: 'export_observation'})")
+    assert isinstance(event, dict)
+    assert "export" in event["detail"].lower()
+    assert "observed" in event["title"].lower()
+    assert "confirmed" not in event["detail"].lower()
+
+
 def test_unattributed_balance_is_always_anonymous() -> None:
     event = evaluate("app.describeEvent({type: 'unattributed_balance', delta: -3, username: 'atlas_studio'})")
     assert isinstance(event, dict)

@@ -5,13 +5,14 @@ import json
 import sqlite3
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
+from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from orbitdiff.models import Event
-from orbitdiff.paths import database_path, default_data_dir
+from orbitdiff.paths import database_path, default_data_dir, ensure_private_directory
 from orbitdiff.providers.base import (
     CollectionIncompleteError,
     InvalidTargetError,
@@ -30,6 +31,13 @@ COOLDOWN = timedelta(minutes=30)
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orbitdiff", description="Confirmed public following-list changes.")
+    try:
+        release = version("orbitdiff")
+    except PackageNotFoundError:
+        from orbitdiff import __version__
+
+        release = __version__
+    parser.add_argument("--version", action="version", version=f"OrbitDiff {release}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     doctor = commands.add_parser("doctor", help="check local readiness without collecting")
@@ -46,6 +54,15 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("target")
     status.add_argument("--data-dir", type=Path)
     status.add_argument("--json", action="store_true")
+
+    targets = commands.add_parser("targets", help="list stored targets without collecting")
+    targets.add_argument("--data-dir", type=Path)
+    targets.add_argument("--json", action="store_true")
+
+    roster = commands.add_parser("roster", help="read confirmed, observed, and pending relationships")
+    roster.add_argument("target")
+    roster.add_argument("--data-dir", type=Path)
+    roster.add_argument("--json", action="store_true")
 
     report = commands.add_parser("report", help="render stored confirmed events")
     report.add_argument("target")
@@ -66,13 +83,6 @@ def _make_live_provider(args: argparse.Namespace) -> InstaloaderProvider:
     return InstaloaderProvider(args.login_username, args.session_file)
 
 
-def _cooldown_active(store: GraphStore, target: str) -> bool:
-    latest = store.last_live_scan_at(target)
-    if latest is None:
-        return False
-    return datetime.now(UTC) - datetime.fromisoformat(latest) < COOLDOWN
-
-
 def _print_events(events: Sequence[Event]) -> None:
     for event in events:
         print(f"{event.event_type} {event.username} ({event.actor_id}) confirmed {event.confirmed_at}")
@@ -81,17 +91,23 @@ def _print_events(events: Sequence[Event]) -> None:
 def _run_live(args: argparse.Namespace, baseline: bool) -> int:
     target = normalize_target(args.target)
     store = _store(args.data_dir)
-    if not baseline and _cooldown_active(store, target):
+    if not store.reserve_live_attempt(target, cooldown=COOLDOWN):
         print("scan cooldown active; wait 30 minutes before another live scan", file=sys.stderr)
         return 3
+    if baseline and store.status(target)["initialized"]:
+        print("target already has a baseline; use an ordinary scan for later observations", file=sys.stderr)
+        return 2
     try:
         collection = _make_live_provider(args).collect(target)
+        if not collection.complete:
+            raise CollectionIncompleteError("collection was not complete")
         events = store.apply_collection(collection, baseline_run=baseline)
     except (InvalidTargetError, PrivateTargetError, SessionUnavailableError) as error:
+        store.record_failed_run(target, str(error), baseline_run=baseline)
         print(str(error), file=sys.stderr)
         return 2
     except (CollectionIncompleteError, ProviderError) as error:
-        store.record_failed_run(target, str(error))
+        store.record_failed_run(target, str(error), baseline_run=baseline)
         print(str(error), file=sys.stderr)
         return 3
     except OSError:
@@ -112,10 +128,10 @@ def _doctor(data_dir: Path | None) -> int:
 def _demo(data_dir: Path | None) -> int:
     temporary_parent: str | None = None
     if data_dir is not None:
-        data_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(data_dir)
         temporary_parent = str(data_dir)
     with TemporaryDirectory(prefix="orbitdiff-demo-", dir=temporary_parent) as temporary_dir:
-        store = _store(Path(temporary_dir))
+        store = _store(Path(temporary_dir).resolve())
         target = "atlas_studio"
         fixtures = files("orbitdiff").joinpath("fixtures")
         baseline = FixtureProvider(Path(str(fixtures.joinpath("baseline.json")))).collect(target)
@@ -135,7 +151,9 @@ def _status(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(state, sort_keys=True))
     else:
-        print(f"{target}: {state['confirmed_count']} confirmed, {state['pending_count']} pending")
+        confirmed = state["confirmed_count"] if state["confirmed_count"] is not None else "unknown"
+        pending = state["pending_count"] if state["pending_count"] is not None else "unknown"
+        print(f"{target}: {confirmed} confirmed, {pending} pending ({state['observation_status']})")
     return 0
 
 
@@ -147,6 +165,31 @@ def _report(args: argparse.Namespace) -> int:
         write_report(args.output, content)
     else:
         print(content, end="")
+    return 0
+
+
+def _targets(args: argparse.Namespace) -> int:
+    targets = _store(args.data_dir).targets()
+    if args.json:
+        print(json.dumps(targets, sort_keys=True))
+    else:
+        for target in targets:
+            confirmed = target["confirmed_count"] if target["confirmed_count"] is not None else "unknown"
+            pending = target["pending_count"] if target["pending_count"] is not None else "unknown"
+            print(f"{target['target']}: {confirmed} confirmed, {pending} pending ({target['observation_status']})")
+    return 0
+
+
+def _roster(args: argparse.Namespace) -> int:
+    target = normalize_target(args.target)
+    accounts = _store(args.data_dir).roster(target)
+    if args.json:
+        print(json.dumps({"target": target, "accounts": accounts}, sort_keys=True))
+    else:
+        for account in accounts:
+            pending = account["pending_present"]
+            state = "pending addition" if pending is True else "pending removal" if pending is False else "confirmed present" if account["confirmed_present"] else "confirmed absent"
+            print(f"{account['username']} ({account['profile_id']}): {state}")
     return 0
 
 
@@ -163,6 +206,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _status(args)
         if args.command == "report":
             return _report(args)
+        if args.command == "targets":
+            return _targets(args)
+        if args.command == "roster":
+            return _roster(args)
         if args.command == "demo":
             return _demo(args.data_dir)
     except InvalidTargetError as error:
