@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0] - 2026-09-29
+
+### Added
+
+- Portable Orbit OS workspace and CLI for personal relationship-export imports, public watchlists, combined reports, offline demo, and app launch.
+- Separate personal snapshot coverage, user-declared completeness, capture dates, duplicate handling, owner binding, and observed-change labels.
+- Local app views for relationships, watchlists, activity, source health, search, filters, and requested CSV exports.
+- Standalone Apple Silicon macOS packaging with a bundled runtime, dependency licenses, checksums, and separate native-bundle audits. The candidate is not Developer ID signed or notarized; other platforms remain unverified.
+- Public target discovery, roster JSON with distinct confirmed/observed/pending state, and version reporting in the original OrbitDiff CLI.
+- Deterministic Agent Skill archive builder with an explicit file allowlist, license, checksums, private-data exclusions, and symlink rejection.
+
+### Changed
+
+- Preserved the canonical `orbitdiff` skill name while adding both personal export and public watchlist workflows, portable setup, exact command references, and evidence-based reporting.
+- Shared live-attempt cooldown across baselines, successful scans, failed attempts, and concurrent reservations.
+- Bounded live collection requests, account counts, retries, and cooperative duration; rate limits and redirects stop collection.
+- Tightened interpretation of incomplete sources, unknown reciprocity, pending removals, failed-only history, and source freshness.
+- Kept compatibility sources read-only through stable private database snapshots and explicit opt-in.
+- Reworked the onboarding prompt around existing user authorization, isolated offline proof, human-only login, and no automatic schedules or retry loops.
+
 ## [0.1.1] - 2026-09-12
 
 ### Added

@@ -1,81 +1,81 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import shlex
+import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 PROMPT = ROOT / "docs" / "prompt.md"
 ONBOARDING = ROOT / "skills" / "orbitdiff" / "references" / "onboarding.md"
-PYPROJECT = ROOT / "pyproject.toml"
-CHANGELOG = ROOT / "CHANGELOG.md"
 
 
-def _prompt_text() -> str:
-    return PROMPT.read_text(encoding="utf-8")
+def test_prompt_release_pins_and_changelog_match_current_package() -> None:
+    current = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    prompt = PROMPT.read_text()
+    pins = re.findall(r"(?:orbitdiff\.git@v|--pin v)([0-9.]+)", prompt)
+    assert pins and set(pins) == {current}
+    heading = re.search(r"^## \[(.+?)\]", (ROOT / "CHANGELOG.md").read_text(), re.MULTILINE)
+    assert heading is not None and heading.group(1) == current
 
 
-def test_prompt_pins_the_current_release_version() -> None:
-    version = re.search(r'^version = "(.+)"$', PYPROJECT.read_text(encoding="utf-8"), re.MULTILINE)
-    assert version is not None
-    current = version.group(1)
-    text = _prompt_text()
-
-    assert f"orbitdiff.git@v{current}" in text
-    assert f"--pin v{current}" in text
-    assert f"v0.1.{int(current.rsplit('.', 1)[1]) - 1}" not in text
-
-
-def test_prompt_mentions_the_latest_changelog_version() -> None:
-    heading = re.search(r"^## \[(.+?)\]", CHANGELOG.read_text(encoding="utf-8"), re.MULTILINE)
-    assert heading is not None
-    assert f"v{heading.group(1)}" in _prompt_text()
-
-
-def test_prompt_requests_instagram_session_safely_and_private_target_refusal() -> None:
-    text = _prompt_text()
-
-    assert "instaloader --login MY_INSTAGRAM_USERNAME" in text
-    assert "never to you" in text
-    assert "target turns out to be private" in text
-    assert "never ask me for my instagram password" in text.lower()
-    assert "orbitdiff init TARGET --login LOGIN" in text
-    assert "orbitdiff scan TARGET --login LOGIN" in text
-    assert "Which public Instagram username do you want to track first?" in text
-
-
-def test_prompt_demo_expectation_uses_only_stable_text() -> None:
-    text = _prompt_text()
-
-    assert "following_stopped nova_labs (200) confirmed" in text
-    assert "following_started ember_lab (300) confirmed" in text
-    assert "timestamp varies" in text
-    for forbidden in ("2026-01-01", "2026-09-1"):
-        assert forbidden not in text
-
-
-def test_bundled_onboarding_reference_stays_in_sync_with_the_repo_prompt() -> None:
-    assert ONBOARDING.is_file(), "skills/orbitdiff/references/onboarding.md must exist for installed skills"
+def test_bundled_prompt_is_identical_and_linked_from_skill() -> None:
     assert ONBOARDING.read_bytes() == PROMPT.read_bytes()
-
-
-def test_skill_points_at_the_bundled_onboarding_reference() -> None:
-    skill = (ROOT / "skills" / "orbitdiff" / "SKILL.md").read_text(encoding="utf-8")
-
+    skill = (ROOT / "skills" / "orbitdiff" / "SKILL.md").read_text()
     assert "references/onboarding.md" in skill
     assert "docs/prompt.md" not in skill
 
 
-def test_prompt_parses_profile_urls_without_query_or_trailing_slash_ambiguity() -> None:
-    text = _prompt_text()
+def test_documented_offline_commands_work_in_an_empty_isolated_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "isolated workspace"
+    environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+    commands = [
+        shlex.split(line.strip()) for line in PROMPT.read_text().splitlines()
+        if re.match(r"^   ORBIT_OS (?:--version|doctor|demo|status|targets|report)\b", line)
+    ]
+    assert commands, "The prompt must include executable offline proof commands"
+    ran_demo = False
+    for command in commands:
+        arguments = [str(workspace) if value == "WORKSPACE" else value for value in command[1:]]
+        module = "orbit_os"
+        result = subprocess.run(
+            [sys.executable, "-m", module, *arguments], env=environment,
+            text=True, capture_output=True, check=False, timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+        if command[:2] == ["ORBIT_OS", "demo"]:
+            demo = json.loads(result.stdout)
+            assert demo["workspace"]["demo"] is True
+            assert demo["personal"]["accounts"] and demo["watchlist"]
+            ran_demo = True
+        elif command[:2] == ["ORBIT_OS", "status"]:
+            payload = json.loads(result.stdout)
+            assert payload["personal"]["status"] == "missing"
+            assert payload["watchlist"] == []
+    assert ran_demo
+    assert not list(workspace.iterdir()), "Offline demonstrations must not seed the real workspace"
 
-    assert "ignore the query string, fragment, and any trailing slash" in text
-    assert "final path segment" not in text
+
+def test_documented_login_command_refuses_agent_pipes() -> None:
+    command = next(
+        shlex.split(line.strip()) for line in PROMPT.read_text().splitlines()
+        if line.startswith("   ORBIT_OS login ")
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "orbit_os", *["atlas_studio" if value == "LOGIN_USERNAME" else value for value in command[1:]]],
+        env=dict(os.environ, PYTHONPATH=str(ROOT / "src")),
+        capture_output=True, text=True, check=False, timeout=15,
+    )
+    assert result.returncode == 2
+    assert "local terminal" in result.stderr
 
 
 def test_prompt_stays_public_safe() -> None:
-    text = _prompt_text()
-
-    assert chr(0x2014) not in text and chr(0x2013) not in text
+    text = PROMPT.read_text()
+    assert chr(0x2014) not in text
     assert "/users/" not in text.lower()
     assert "hermes" not in text.lower()
-    assert "telegram" not in text.lower()

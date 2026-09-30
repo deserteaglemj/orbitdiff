@@ -1,5 +1,6 @@
 interface:
   display_name: "OrbitDiff"
-  short_description: "Confirm public following-list changes locally"
-  icon: "../assets/orbitdiff-mark.svg"
-  default_prompt: "Use OrbitDiff to safely inspect confirmed changes for a public target. Start with the offline demo and never request credentials."
+  short_description: "Local Instagram relationships and public watchlists"
+  icon_small: "./assets/orbitdiff-mark.svg"
+  icon_large: "./assets/orbitdiff-wordmark.svg"
+  default_prompt: "Use $orbitdiff to inspect my local Instagram relationships or a public watchlist. Choose the evidence source, verify the installed version, preserve incomplete data as unknown, and never request credentials."

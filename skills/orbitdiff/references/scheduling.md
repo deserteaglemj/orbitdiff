@@ -1,16 +1,16 @@
-# Responsible scheduling
+# Explicit scans and cadence
 
-OrbitDiff does not ship a daemon. Use an existing local scheduler only after the offline demo and one successful manual cycle.
+Orbit OS and this skill install no recurring job or background daemon. Opening the app, refreshing, reading relationships, and exporting reports do not scan Instagram.
 
-- Keep at least 30 minutes between live scans of the same target.
-- Start with a low-frequency cadence appropriate to the research question.
-- Stop rather than retrying rapidly after a rate limit, challenge, private-target refusal, missing session, or incomplete collection.
-- Review `orbitdiff status PUBLIC_TARGET --json` after a run. Pending changes need another matching complete scan before they are confirmed.
+Do not offer or create a schedule as part of ordinary onboarding. If the user explicitly requests recurring scans, use the agent host's supported scheduling tool and the user's existing authorization. Do not install a second scheduler or silently add a recurring process.
 
-A local scheduler should invoke only the bounded read-only command:
+For an authorized schedule:
 
-```bash
-orbitdiff scan PUBLIC_TARGET --login LOGIN_USERNAME
-```
+- Preserve one explicit workspace, target, and human-created login session.
+- Keep at least 30 minutes between live attempts for the same target. Baselines, failures, and successful scans all count.
+- Start from an already verified manual workflow. A daily attempt is a reasonable low-frequency example, not a guarantee of successful collection.
+- Run one bounded scan and inspect stored status. Never add retry loops or overlapping catch-up runs.
+- After a rate limit, challenge, missing session, or private-target refusal, surface the failure and require local recovery where needed. Do not treat repeated failures as zero changes.
+- Personal relationship exports do not refresh through a public watchlist schedule. They require a new user-supplied export.
 
-Do not add account actions, hidden retries, account switching, cloud uploads, or high-frequency polling.
+The original CLI reports pending differences until a later complete observation agrees. Scheduling does not change this evidence rule or permit account actions, account switching, enrichment, or cloud uploads.

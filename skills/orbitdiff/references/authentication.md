@@ -1,17 +1,17 @@
-# Local authentication
+# Human-operated local login
 
-OrbitDiff never asks for or accepts credentials. A human creates an Instaloader session in their own terminal before OrbitDiff scans a public target:
+Personal export imports, reports, demos, and app launch need no Instagram login.
 
-```bash
-instaloader --login YOUR_INSTAGRAM_USERNAME
-```
-
-Stop while the human completes this step. Do not ask them to paste a password, verification code, session material, browser data, or any credential into chat.
-
-After the human confirms the saved local session exists, OrbitDiff can load it by login username:
+Live public following collection uses an existing local Instaloader saved session. If it is missing or rejected, give the human this command to run themselves in their own terminal:
 
 ```bash
-orbitdiff init PUBLIC_TARGET --login LOGIN_USERNAME
+orbit-os login LOGIN_USERNAME
 ```
 
-If the session is missing, expired, challenged, or rejected, stop and ask the human to resolve it locally. Do not invent a workaround or add a new login flow.
+The package includes the login dependency. No separate Instaloader installation is needed. The human enters credentials directly into that local tool, never into agent chat. The command refuses noninteractive agent pipes.
+
+The agent may use the human's supplied login handle for an authorized scan after the human confirms setup. Do not ask for, read, copy, inspect, upload, or embed saved-session contents, passwords, verification codes, browser databases, cookies, or API keys. Do not take over the login interaction even if an agent terminal can emulate a TTY.
+
+The legacy CLI still supports `instaloader --login LOGIN_USERNAME` in a human terminal where that executable is available. Its `--session-file PATH` argument accepts a local path, never inline session material. Do not invent a path or search personal browser directories.
+
+If login is expired, challenged, or rate-limited, report the state and leave recovery to the human. Do not switch accounts, bypass private-profile restrictions, or retry automatically. `orbit-os doctor` checks local storage, not login validity.
