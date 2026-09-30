@@ -225,6 +225,17 @@ export interface ConsentStateDto {
   marketing: { granted: boolean; version: string; recordedAt: string } | null;
 }
 
+/**
+ * Body of POST /api/me/onboarding: the version of each document the page
+ * showed to the person. Naming a version is the acceptance, and there is no
+ * separate flag. The server accepts only the current version of each document
+ * and records the versions named here.
+ */
+export interface OnboardingRequestDto {
+  termsVersion: string;
+  privacyVersion: string;
+}
+
 export interface MeDto {
   id: string;
   email: string;
