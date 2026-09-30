@@ -1,11 +1,11 @@
 import { CapabilityNotice } from "@/components/capability-notice";
 import { buttonClasses, EmptyState, Notice, PageHeader, Panel, SectionHeading } from "@/components/ui";
-import type { ActivityDto, Page } from "@/server/services/contracts";
+import type { ActivityDto, Page, ScheduleStateDto } from "@/server/services/contracts";
 
 import { ActivityFeed } from "./activity-feed";
 import { ACTIVITY_ANCHOR, type ActivityQuery } from "./activity-model";
 import { AddProfileForm } from "./add-profile-form";
-import { ADD_PROFILE_FIELD_ID, type ProfileCardModel, staleBanner } from "./card-model";
+import { ADD_PROFILE_FIELD_ID, type ProfileCardModel, schedulePause, staleBanner } from "./card-model";
 import { zoneLabel } from "./local-time";
 import { ProfileCard } from "./profile-card";
 
@@ -14,6 +14,8 @@ export interface DashboardScreenProps {
   cards: ProfileCardModel[];
   quota: { used: number; limit: number };
   activity: { query: ActivityQuery; page: Page<ActivityDto> };
+  /** Whether scheduled work runs or is paused at the daily job capacity. */
+  schedule?: ScheduleStateDto | null;
 }
 
 const DASHBOARD = "/dashboard";
@@ -23,8 +25,9 @@ const DASHBOARD = "/dashboard";
  * card per profile, the form that adds a profile, and the activity feed. A
  * page without a profile leads to adding one and then to importing.
  */
-export function DashboardScreen({ timeZone, cards, quota, activity }: DashboardScreenProps) {
+export function DashboardScreen({ timeZone, cards, quota, activity, schedule = null }: DashboardScreenProps) {
   const stale = staleBanner(cards);
+  const paused = schedulePause(schedule, timeZone);
   const firstWithoutImport = cards.find((card) => !card.hasImport)?.id ?? null;
 
   return (
@@ -34,6 +37,12 @@ export function DashboardScreen({ timeZone, cards, quota, activity }: DashboardS
         description={`What your imported exports show for each profile, and what happened to them. Times are in ${zoneLabel(timeZone)}.`}
       />
       <CapabilityNotice className="mt-6" />
+
+      {paused ? (
+        <Notice tone="info" label="Paused" className="mt-4" title={paused.title}>
+          <p>{paused.detail}</p>
+        </Notice>
+      ) : null}
 
       {stale ? (
         <Notice tone="warning" className="mt-4" title={stale.title}>

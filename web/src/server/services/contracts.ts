@@ -95,6 +95,18 @@ export interface ReviewRecord {
   following: number | null;
 }
 
+/**
+ * Which comparisons the consecutive dated exports allowed: for each direction,
+ * the number of pairs in which additions (earlier list complete) and removals
+ * (later list complete) could be checked. No observation with no check means
+ * "unknown", never "no difference".
+ */
+export interface ComparisonRecord {
+  pairs: number;
+  followers: { added: number; removed: number };
+  following: { added: number; removed: number };
+}
+
 /** Stored in `activity_entry.summary` for kind `import_processed`. */
 export interface ImportProcessedRecord {
   snapshotCount: number;
@@ -103,6 +115,8 @@ export interface ImportProcessedRecord {
   eventCount: number;
   added: { followers: number; following: number };
   removed: { followers: number; following: number };
+  /** Absent from entries written before it was recorded. */
+  comparison?: ComparisonRecord;
 }
 
 export interface JobDto {
@@ -143,6 +157,21 @@ export interface ProfileDto {
   /** Null when the profile is paused. */
   nextReviewAt: string | null;
   activeJob: JobDto | null;
+  /**
+   * The export that coverage, metrics, and issues describe: the one the last
+   * successful processing read. While an import waits for processing (see
+   * `processing`) it is an older export than the current one, and its capture
+   * time and evidence state are what describe the numbers. Null before the
+   * first processed import.
+   */
+  processed: { snapshotId: string; capturedAt: string | null; evidence: EvidenceStatus } | null;
+  /**
+   * Processing of the newest import failed and nothing has processed it since:
+   * the profile is still processing and its newest finished processing job
+   * failed. A review never clears this, because a review processes nothing.
+   * Null otherwise.
+   */
+  processingFailure: { failedAt: string; code: string | null } | null;
 }
 
 export interface SnapshotDto {
@@ -291,6 +320,16 @@ export interface CapacityDto {
   lastTick: TickSummaryDto | null;
   mail: { available: boolean; mode: "captured" | "none" };
   registration: { open: boolean; reason: string | null };
+}
+
+/**
+ * Whether scheduled work runs. Every job pauses once the day's job count has
+ * reached CAPACITY_MAX_JOBS_PER_DAY; it resumes at the next UTC midnight.
+ */
+export interface ScheduleStateDto {
+  paused: boolean;
+  /** When scheduled work resumes, while it is paused. Null otherwise. */
+  resumesAt: string | null;
 }
 
 /** Returned by the protected batch endpoint. Counts only, never account data. */

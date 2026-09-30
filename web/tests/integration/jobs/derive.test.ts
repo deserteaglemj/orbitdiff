@@ -83,6 +83,7 @@ describe("derive_profile", () => {
       eventCount: 0,
       added: { followers: 0, following: 0 },
       removed: { followers: 0, following: 0 },
+      comparison: { pairs: 0, followers: { added: 0, removed: 0 }, following: { added: 0, removed: 0 } },
     };
     expect(entries[0]?.summary).toEqual(record);
     expect((await jobRow(queued.id))?.status).toBe("succeeded");
@@ -136,6 +137,24 @@ describe("derive_profile", () => {
       eventCount: 2,
       added: { followers: 1, following: 0 },
       removed: { followers: 1, following: 0 },
+      comparison: { pairs: 1, followers: { added: 1, removed: 1 }, following: { added: 1, removed: 1 } },
+    });
+  });
+
+  it("records that nothing could be compared between two exports whose lists were not declared complete", async () => {
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    await addSnapshot(owner, { capturedAt: FIRST, followers: ["nova_labs", "pixel_forge"] });
+    await addSnapshot(owner, { capturedAt: SECOND, followers: ["ember_lab", "nova_labs"] });
+    await queueDerive(owner, NOW);
+
+    await runQueued(NOW);
+
+    expect(await eventsOf(owner.profileId)).toEqual([]);
+    const [entry] = await activityOf(owner.profileId, "import_processed");
+    expect(entry?.summary).toMatchObject({
+      datedSnapshotCount: 2,
+      eventCount: 0,
+      comparison: { pairs: 1, followers: { added: 0, removed: 0 }, following: { added: 0, removed: 0 } },
     });
   });
 

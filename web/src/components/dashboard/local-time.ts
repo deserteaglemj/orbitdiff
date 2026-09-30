@@ -1,4 +1,5 @@
 import { UNKNOWN } from "@/components/ui/format";
+import { canonicalTimezone } from "@/domain/schedule";
 
 /**
  * Times as the signed-in pages show them: in one named timezone, on a 24 hour
@@ -8,34 +9,40 @@ import { UNKNOWN } from "@/components/ui/format";
  */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FALLBACK_ZONE = "UTC";
+/** More than the runtime has canonical zone names; the keys are canonical names only. */
+const MAX_CACHED_ZONES = 1_024;
 
-const formatters = new Map<string, Intl.DateTimeFormat | null>();
+/**
+ * One formatter per canonical zone name. A name the runtime does not know is
+ * never a key, and neither is any other spelling of a known one, so the cache
+ * cannot grow with the values it is handed.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
 
-function formatterFor(timeZone: string): Intl.DateTimeFormat | null {
-  const cached = formatters.get(timeZone);
+function formatterFor(zone: string): Intl.DateTimeFormat {
+  const cached = formatters.get(zone);
   if (cached !== undefined) return cached;
-  let created: Intl.DateTimeFormat | null;
-  try {
-    created = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      second: "numeric",
-    });
-  } catch {
-    created = null;
-  }
-  formatters.set(timeZone, created);
+  const created = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  });
+  if (formatters.size >= MAX_CACHED_ZONES) formatters.clear();
+  formatters.set(zone, created);
   return created;
 }
 
-/** The timezone that is really used: the given one when the runtime knows it, otherwise UTC. */
+/**
+ * The timezone that is really used: the canonical name of the given one when
+ * the runtime knows it ("europe/berlin" is "Europe/Berlin"), otherwise UTC.
+ */
 export function zoneLabel(timeZone: string): string {
-  return typeof timeZone === "string" && formatterFor(timeZone) !== null ? timeZone : FALLBACK_ZONE;
+  return canonicalTimezone(timeZone) ?? FALLBACK_ZONE;
 }
 
 interface Wall {
@@ -48,7 +55,7 @@ interface Wall {
 }
 
 function wallClock(instant: number, timeZone: string): Wall {
-  const formatter = formatterFor(zoneLabel(timeZone)) as Intl.DateTimeFormat;
+  const formatter = formatterFor(zoneLabel(timeZone));
   const fields: Record<string, number> = {};
   for (const part of formatter.formatToParts(new Date(instant))) {
     if (part.type !== "literal") fields[part.type] = Number(part.value);

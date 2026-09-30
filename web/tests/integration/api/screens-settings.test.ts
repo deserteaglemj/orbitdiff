@@ -132,11 +132,21 @@ describe("the product news toggle against POST /api/me/consent", () => {
 
   it("records a withdrawal, sent as the boolean false with no version", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
+    expect((await post(atlas.cookie, true)).status).toBe(200);
     const response = await post(atlas.cookie, false);
     expect(response.status).toBe(200);
     const state = (await response.json()) as ConsentStateDto;
     expect(marketingSummary(state.marketing)).toMatchObject({ granted: false, badge: "Off" });
     expect((await consentRows(atlas.userId, "marketing")).at(-1)).toMatchObject({ granted: false, source: "settings" });
+  });
+
+  it("answers a withdrawal while product news is already off without writing to the log", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
+    const before = await consentRows(atlas.userId, "marketing");
+    const response = await post(atlas.cookie, false);
+    expect(response.status).toBe(200);
+    expect(marketingSummary(((await response.json()) as ConsentStateDto).marketing)).toMatchObject({ granted: false });
+    expect(await consentRows(atlas.userId, "marketing")).toEqual(before);
   });
 
   it("refuses a grant from a page that was open while the consent text changed, and the form says so", async () => {

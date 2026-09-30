@@ -5,7 +5,7 @@ import { closeDb, getDb } from "@/server/db/client";
 import { systemState } from "@/server/db/schema";
 import { LAST_TICK_STATE_KEY } from "@/server/http/health";
 
-import { signUp } from "../../helpers/auth";
+import { createVerifiedUser } from "../../helpers/auth";
 import { resetDatabase } from "../../helpers/db";
 import { restoreTestEnv, setTestEnv } from "../../helpers/env";
 import { callRoute } from "../../helpers/http";
@@ -52,7 +52,8 @@ describe("GET /api/health", () => {
 
   it("reports registration paused at user capacity", async () => {
     setTestEnv({ CAPACITY_MAX_USERS: "1" });
-    await signUp({ email: "atlas@orbitdiff.test" });
+    // Only a verified account takes a place.
+    await createVerifiedUser({ email: "atlas@orbitdiff.test" });
     const body = await (await health()).json();
     expect(body.registration).toMatchObject({
       open: false,

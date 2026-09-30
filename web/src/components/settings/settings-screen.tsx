@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
 import { TEXT_LINK } from "@/components/auth/auth-parts";
-import { PageHeader, Panel } from "@/components/ui";
-import type { MeDto } from "@/server/services/contracts";
+import { schedulePause } from "@/components/dashboard/card-model";
+import { Notice, PageHeader, Panel } from "@/components/ui";
+import type { MeDto, ScheduleStateDto } from "@/server/services/contracts";
 
 import { ConsentRecord } from "./consent-record";
 import { DataSection } from "./data-section";
@@ -21,6 +22,8 @@ export interface SettingsScreenProps {
   versions: { terms: string; privacy: string; marketing: string };
   /** The profiles of the account with the time of their next daily review. */
   profiles: ScheduledProfile[];
+  /** Whether scheduled work runs or is paused at the daily job capacity. */
+  schedule?: ScheduleStateDto | null;
 }
 
 const SECTIONS = [
@@ -55,7 +58,8 @@ function Section({ id, description, children }: { id: SectionId; description: st
  * or the auth client and shows that route's own message when it refuses.
  * Nothing here asks for anything about an Instagram login.
  */
-export function SettingsScreen({ me, timezones, versions, profiles }: SettingsScreenProps) {
+export function SettingsScreen({ me, timezones, versions, profiles, schedule = null }: SettingsScreenProps) {
+  const paused = schedulePause(schedule, me.timezone);
   return (
     <>
       <PageHeader
@@ -82,6 +86,11 @@ export function SettingsScreen({ me, timezones, versions, profiles }: SettingsSc
           <div className="grid gap-8">
             <ProfileForm account={{ name: me.name, timezone: me.timezone, reviewHour: me.reviewHour }} timezones={timezones} />
             <div className="border-t border-line pt-6">
+              {paused ? (
+                <Notice tone="info" label="Paused" className="mb-4" title={paused.title}>
+                  <p>{paused.detail}</p>
+                </Notice>
+              ) : null}
               <ReviewSchedule profiles={profiles} timeZone={me.timezone} />
             </div>
           </div>

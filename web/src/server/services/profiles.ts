@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { formatCaptureTime } from "@/domain/capture-time";
 import { parseProfileInput } from "@/domain/handles";
@@ -68,14 +68,29 @@ interface CurrentSnapshot {
   followingComplete: boolean;
 }
 
+/** The newest finished processing job of one outcome. */
+interface FinishedDerive {
+  finishedAt: Date;
+  lastErrorCode: string | null;
+}
+
 interface ProfileContext {
   current: CurrentSnapshot | null;
   snapshotCount: number;
   lastImportAt: Date | null;
   activeJob: JobRow | null;
+  lastDeriveFailure: FinishedDerive | null;
+  lastDeriveSuccess: FinishedDerive | null;
 }
 
-const EMPTY_CONTEXT: ProfileContext = { current: null, snapshotCount: 0, lastImportAt: null, activeJob: null };
+const EMPTY_CONTEXT: ProfileContext = {
+  current: null,
+  snapshotCount: 0,
+  lastImportAt: null,
+  activeJob: null,
+  lastDeriveFailure: null,
+  lastDeriveSuccess: null,
+};
 
 /** Evidence state of the current export at `now`. Coverage comes from the stored snapshot, not the summary. */
 export function evidenceOf(current: CurrentSnapshot | null, now: Date): EvidenceStatus {
@@ -97,8 +112,45 @@ function readSummary(value: unknown): ProfileSummaryRecord | null {
   return record as ProfileSummaryRecord;
 }
 
+/**
+ * The export the summary describes, with its own evidence state. The summary
+ * stores its snapshot, capture time, and coverage, so this needs no other read.
+ */
+function processedExport(summary: ProfileSummaryRecord | null, now: Date): ProfileDto["processed"] {
+  if (summary === null) return null;
+  const captured = typeof summary.capturedAt === "string" ? new Date(summary.capturedAt) : null;
+  const capturedAt = captured !== null && !Number.isNaN(captured.getTime()) ? captured : null;
+  return {
+    snapshotId: summary.snapshotId,
+    capturedAt: capturedAt === null ? null : formatCaptureTime(capturedAt),
+    evidence: evidenceOf(
+      {
+        id: summary.snapshotId,
+        capturedAt,
+        followersComplete: summary.coverage.followers?.complete === true,
+        followingComplete: summary.coverage.following?.complete === true,
+      },
+      now,
+    ),
+  };
+}
+
+/**
+ * A failed processing stands while the profile is still behind its imports and
+ * no processing job has succeeded since that failure. A review is not a
+ * processing job, so its success never clears it.
+ */
+function processingFailureOf(processing: boolean, context: ProfileContext): ProfileDto["processingFailure"] {
+  const failure = context.lastDeriveFailure;
+  if (!processing || failure === null) return null;
+  const success = context.lastDeriveSuccess;
+  if (success !== null && success.finishedAt.getTime() >= failure.finishedAt.getTime()) return null;
+  return { failedAt: failure.finishedAt.toISOString(), code: failure.lastErrorCode };
+}
+
 function toProfileDto(row: ProfileRow, context: ProfileContext, now: Date): ProfileDto {
   const summary = readSummary(row.summary);
+  const processing = row.derivedRevision !== row.contentRevision;
   return {
     id: row.id,
     handle: row.handle,
@@ -108,7 +160,7 @@ function toProfileDto(row: ProfileRow, context: ProfileContext, now: Date): Prof
     evidence: evidenceOf(context.current, now),
     // The summary is trusted only at the revision it was derived for. Until the derive job
     // catches up, the last derived summary stays visible and the profile is marked processing.
-    processing: row.derivedRevision !== row.contentRevision,
+    processing,
     currentSnapshotId: context.current?.id ?? null,
     capturedAt: context.current?.capturedAt ? formatCaptureTime(context.current.capturedAt) : null,
     lastImportAt: isoOrNull(context.lastImportAt),
@@ -123,6 +175,8 @@ function toProfileDto(row: ProfileRow, context: ProfileContext, now: Date): Prof
     lastReviewAt: isoOrNull(row.lastReviewAt),
     nextReviewAt: row.status === "paused" ? null : isoOrNull(row.nextReviewAt),
     activeJob: context.activeJob ? toJobDto(context.activeJob) : null,
+    processed: processedExport(summary, now),
+    processingFailure: processingFailureOf(processing, context),
   };
 }
 
@@ -177,6 +231,33 @@ async function loadContexts(
   for (const active of jobs) {
     const context = contexts.get(active.profileId);
     if (context && !context.activeJob) context.activeJob = active;
+  }
+
+  // The newest failed and the newest succeeded processing job of each profile: one row per profile and outcome.
+  const finished = await executor
+    .selectDistinctOn([job.profileId, job.status], {
+      profileId: job.profileId,
+      status: job.status,
+      finishedAt: job.finishedAt,
+      lastErrorCode: job.lastErrorCode,
+    })
+    .from(job)
+    .where(
+      and(
+        eq(job.userId, userId),
+        inArray(job.profileId, profileIds),
+        eq(job.kind, "derive_profile"),
+        inArray(job.status, ["failed", "succeeded"]),
+        isNotNull(job.finishedAt),
+      ),
+    )
+    .orderBy(job.profileId, job.status, desc(job.finishedAt), desc(job.id));
+  for (const outcome of finished) {
+    const context = contexts.get(outcome.profileId);
+    if (!context || outcome.finishedAt === null) continue;
+    const entry = { finishedAt: outcome.finishedAt, lastErrorCode: outcome.lastErrorCode };
+    if (outcome.status === "failed") context.lastDeriveFailure = entry;
+    else context.lastDeriveSuccess = entry;
   }
   return contexts;
 }
@@ -290,11 +371,45 @@ export async function createProfile(userId: string, input: unknown, now: Date = 
   return describe(userId, row, now, db);
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Refuses a resume once the profile was resumed LIMITS.resumesPerProfilePerDay
+ * times on the UTC day of `now`. Each change of status is an activity entry, so
+ * without this bound one account could grow the shared activity table without
+ * limit by toggling a profile. A pause always follows a resume, so bounding
+ * resumes bounds both.
+ */
+async function assertResumeAllowed(userId: string, profileId: string, now: Date, executor: Executor): Promise<void> {
+  const limit = LIMITS.resumesPerProfilePerDay;
+  const dayStart = new Date(Math.floor(now.getTime() / DAY_MS) * DAY_MS);
+  const [counted] = await executor
+    .select({ n: sql<number>`count(*)::int` })
+    .from(activityEntry)
+    .where(
+      and(
+        eq(activityEntry.userId, userId),
+        eq(activityEntry.profileId, profileId),
+        eq(activityEntry.kind, "profile_resumed"),
+        gte(activityEntry.occurredAt, dayStart),
+      ),
+    );
+  if ((counted?.n ?? 0) >= limit) {
+    throw new AppError(
+      "quota_exhausted",
+      `A profile can be resumed at most ${limit} times a day. Try again after midnight UTC. Pausing always works.`,
+      { quota: "resumes", limit },
+    );
+  }
+}
+
 /**
  * Pause or resume a profile. Pausing stops scheduled reviews: it clears the
  * next review time and cancels queued review jobs in the same transaction.
  * Stored imports and their results are untouched. Resuming schedules the next
- * review from the user's timezone and review hour.
+ * review from the user's timezone and review hour; it is limited to
+ * LIMITS.resumesPerProfilePerDay per UTC day (`quota_exhausted`). Pausing is
+ * never limited.
  */
 export async function setProfileStatus(
   userId: string,
@@ -320,6 +435,7 @@ export async function setProfileStatus(
     if (status === "paused") {
       await cancelQueuedJobs(tx, { userId, profileId: id, kinds: REVIEW_KINDS }, "profile_paused");
     } else {
+      await assertResumeAllowed(userId, id, now, tx);
       const [owner] = await tx
         .select({ timezone: user.timezone, reviewHour: user.reviewHour })
         .from(user)

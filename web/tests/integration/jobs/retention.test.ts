@@ -5,11 +5,13 @@ import { LIMITS } from "@/domain/limits";
 import { closeDb, getDb } from "@/server/db/client";
 import {
   activityEntry,
+  auditEvent,
   exportSnapshot,
   job,
   mailCapture,
   profile,
   rateLimit,
+  session,
   user,
   verification,
 } from "@/server/db/schema";
@@ -183,6 +185,39 @@ describe("runRetention", () => {
 
     expect(result.rateLimits).toBe(1);
     expect(await ids(getDb().select({ id: rateLimit.id }).from(rateLimit))).toEqual(["r-new"]);
+  });
+
+  it("removes sessions that have expired and keeps live ones", async () => {
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    const signedIn = await ids(getDb().select({ id: session.id }).from(session).where(eq(session.userId, owner.userId)));
+    await getDb()
+      .update(session)
+      .set({ expiresAt: new Date(NOW.getTime() + DAY) })
+      .where(eq(session.userId, owner.userId));
+    await getDb().insert(session).values([
+      { id: "s-expired", token: "t-expired", userId: owner.userId, expiresAt: new Date(NOW.getTime() - 1000), updatedAt: NOW },
+      { id: "s-old", token: "t-old", userId: owner.userId, expiresAt: daysAgo(30), updatedAt: NOW },
+    ]);
+
+    const result = await runRetention({ now: NOW });
+
+    expect(result.sessions).toBe(2);
+    expect((await ids(getDb().select({ id: session.id }).from(session))).sort()).toEqual([...signedIn].sort());
+  });
+
+  it("removes security events past their window and keeps newer ones", async () => {
+    await getDb().insert(auditEvent).values([
+      { action: "registration_refused", detail: { code: "REGISTRATION_CLOSED" }, at: daysAgo(LIMITS.retainAuditDays, 1) },
+      { action: "registration_refused", detail: { code: "REGISTRATION_CLOSED" }, at: daysAgo(LIMITS.retainAuditDays + 40) },
+      { action: "account_deleted", at: daysAgo(LIMITS.retainAuditDays - 1) },
+    ]);
+
+    const result = await runRetention({ now: NOW });
+
+    expect(result.auditEvents).toBe(2);
+    expect((await getDb().select({ action: auditEvent.action }).from(auditEvent)).map((row) => row.action)).toEqual([
+      "account_deleted",
+    ]);
   });
 
   it("never removes a snapshot, a profile, or a verified user, however old", async () => {

@@ -48,6 +48,12 @@ describe("zoneLabel", () => {
     expect(zoneLabel("Europe/Berlin")).toBe("Europe/Berlin");
     expect(zoneLabel("Mars/Olympus")).toBe("UTC");
   });
+
+  it("names a zone written in another case by its canonical name", () => {
+    expect(zoneLabel("europe/berlin")).toBe("Europe/Berlin");
+    expect(zoneLabel("EUROPE/BERLIN")).toBe("Europe/Berlin");
+    expect(formatLocalTime("2026-09-30T12:00:00Z", "eUrOpE/bErLiN")).toBe("30 Sep 2026, 14:00 (Europe/Berlin)");
+  });
 });
 
 describe("localInputToIso", () => {

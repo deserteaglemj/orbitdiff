@@ -2,12 +2,18 @@ import "server-only";
 
 import { and, desc, eq, like, sql } from "drizzle-orm";
 
+import {
+  comparisonExtent,
+  NOTHING_COMPARED,
+  NOTHING_COMPARED_REASON,
+  partlyCompared,
+} from "@/components/comparison-copy";
 import { formatDate, observedBetween } from "@/components/ui/format";
 import { getDb } from "@/server/db/client";
 import { activityEntry, profile, user } from "@/server/db/schema";
 import { AppError } from "@/server/http/errors";
 
-import type { ActivityDto, ActivityKind, ActivityStatus, Page } from "./contracts";
+import type { ActivityDto, ActivityKind, ActivityStatus, ComparisonRecord, Page } from "./contracts";
 import { requireOwnedProfile } from "./profiles";
 import { containsPattern, type PageRequest, pageWindow, searchText, toPage } from "./shared";
 
@@ -52,6 +58,23 @@ type Summary = Record<string, unknown>;
 const text = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
 const count = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+
+/** The stored comparison record, or null when the entry has none or it is not the expected shape. */
+function comparisonOf(value: unknown): ComparisonRecord | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const sides = (entry: unknown): { added: number; removed: number } | null => {
+    if (typeof entry !== "object" || entry === null) return null;
+    const added = count((entry as Record<string, unknown>).added);
+    const removed = count((entry as Record<string, unknown>).removed);
+    return added === null || removed === null ? null : { added, removed };
+  };
+  const pairs = count(record.pairs);
+  const followers = sides(record.followers);
+  const following = sides(record.following);
+  if (pairs === null || followers === null || following === null) return null;
+  return { pairs, followers, following };
+}
 
 function day(value: string | Date | null, timeZone: string): string | null {
   if (value === null) return null;
@@ -102,12 +125,30 @@ function importProcessed(summary: Summary, context: EntryContext): Wording {
     };
   }
   const events = count(summary.eventCount) ?? 0;
-  const between =
+  const dates =
     context.firstCapture && context.lastCapture
-      ? observedBetween(context.firstCapture.toISOString(), context.lastCapture.toISOString(), context.timeZone)
-      : "observed in your export between your dated imports";
+      ? { first: context.firstCapture.toISOString(), last: context.lastCapture.toISOString() }
+      : null;
+  const between = dates
+    ? observedBetween(dates.first, dates.last, context.timeZone)
+    : "observed in your export between your dated imports";
   if (events === 0) {
-    return { title: "No differences observed", detail: `No differences were ${between}.` };
+    const span = dates
+      ? `between ${day(dates.first, context.timeZone)} and ${day(dates.last, context.timeZone)}`
+      : "between your dated imports";
+    // No observation is "no difference" only where a comparison could run.
+    const comparison = comparisonOf(summary.comparison);
+    if (comparison === null) {
+      return { title: "No export observations", detail: `No export observation was recorded ${span}.` };
+    }
+    const extent = comparisonExtent(comparison);
+    if (extent === "none") {
+      return { title: NOTHING_COMPARED, detail: `${NOTHING_COMPARED} ${span}. ${NOTHING_COMPARED_REASON}` };
+    }
+    return {
+      title: "No differences observed",
+      detail: `No differences were ${between}${extent === "partial" ? partlyCompared(comparison) : "."}`,
+    };
   }
   const noun = events === 1 ? "difference was" : "differences were";
   return {

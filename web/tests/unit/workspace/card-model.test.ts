@@ -8,6 +8,7 @@ import {
   exportAge,
   profileCard,
   profileQuota,
+  schedulePause,
   sourceLine,
   staleBanner,
 } from "@/components/dashboard/card-model";
@@ -196,6 +197,128 @@ describe("profileCard", () => {
       NO_EXTRAS,
     );
     expect(card.failure).toBeNull();
+  });
+
+  describe("while an import waits for processing", () => {
+    // The numbers on the card still come from the processed export captured on 1 Jun.
+    const waiting: Partial<ProfileDto> = {
+      processing: true,
+      evidence: "ok",
+      currentSnapshotId: "5c0e7b1a-2d3f-4a5b-8c6d-7e8f9a0b1c2d",
+      capturedAt: "2026-09-30T11:00:00+00:00",
+      processed: { snapshotId: "9d1f6a52-0c3b-4f7e-8a21-5b6c7d8e9f01", capturedAt: OLD_CAPTURE, evidence: "stale" },
+    };
+
+    it("describes the export the numbers come from, not the newer one", () => {
+      const card = profileCard(profile(waiting), NO_EXTRAS);
+      expect(card.badges.map((badge) => badge.text)).not.toContain("Current");
+      expect(card.badges.map((badge) => badge.text)).toContain("Stale");
+      expect(card.stale).toBe(true);
+      expect(card.sourceLine).toBe("Owner export, captured 1 Jun 2026, 07:00 (America/Chicago)");
+    });
+
+    it("names the newer export that is waiting, apart from the numbers", () => {
+      const card = profileCard(profile(waiting), NO_EXTRAS);
+      expect(card.processing).toEqual({
+        title: "Processing import",
+        detail:
+          "A newer export, captured 30 Sep 2026, 06:00 (America/Chicago), is stored and waiting to be processed. " +
+          "Until then this shows the last processed result, from the export captured 1 Jun 2026, 07:00 (America/Chicago).",
+      });
+    });
+
+    it("keeps describing the current export once processing has caught up", () => {
+      const card = profileCard(profile({ ...waiting, processing: false }), NO_EXTRAS);
+      expect(card.badges.map((badge) => badge.text)).toEqual(["Current"]);
+      expect(card.sourceLine).toBe("Owner export, captured 30 Sep 2026, 06:00 (America/Chicago)");
+    });
+  });
+
+  describe("a processing failure", () => {
+    const failedProcessing: Partial<ProfileDto> = {
+      processing: true,
+      activeJob: null,
+      processingFailure: { failedAt: "2026-09-30T15:00:00.000Z", code: "handler_error" },
+      lastFailureAt: "2026-09-30T15:00:00.000Z",
+      lastFailureCode: "handler_error",
+      // A review ran after the failure. It succeeded, but it processes no import.
+      lastSuccessAt: "2026-09-30T16:00:00.000Z",
+      lastReviewAt: "2026-09-30T16:00:00.000Z",
+    };
+    const extras = { ...NO_EXTRAS, lastProcessedAt: "2026-09-29T18:00:05.000Z" };
+
+    it("stays on the card after a later review, next to the last processed result", () => {
+      const card = profileCard(profile(failedProcessing), extras);
+      expect(card.failure).toEqual({
+        title: "Processing an import failed",
+        failed:
+          "Failed on 30 Sep 2026, 10:00 (America/Chicago). Reason code: handler_error. It is tried again once a day.",
+        lastSuccess: "Last processed result: 29 Sep 2026, 13:00 (America/Chicago). It is unchanged.",
+      });
+      expect(card.stats.map((stat) => stat.value)).toEqual([2, 3, 1, 2]);
+    });
+
+    it("says processing failed, not that the import is waiting", () => {
+      const card = profileCard(profile(failedProcessing), extras);
+      expect(card.processing).toEqual({
+        title: "Processing failed",
+        detail:
+          "Processing the newest import failed. It is tried again once a day. Until then this shows the last processed result.",
+      });
+    });
+
+    it("says it is being tried again while a new attempt is queued", () => {
+      const retry = {
+        id: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+        kind: "derive_profile" as const,
+        status: "queued" as const,
+        attempts: 0,
+        maxAttempts: 3,
+        runAfter: "2026-09-30T17:00:00.000Z",
+        createdAt: "2026-09-30T17:00:00.000Z",
+        finishedAt: null,
+        lastErrorCode: null,
+      };
+      const card = profileCard(profile({ ...failedProcessing, activeJob: retry }), extras);
+      expect(card.failure?.failed).toBe(
+        "Failed on 30 Sep 2026, 10:00 (America/Chicago). Reason code: handler_error. It is being tried again.",
+      );
+      expect(card.processing?.detail).toContain("It is being tried again.");
+    });
+
+    it("says so when no import was processed before", () => {
+      const card = profileCard(profile(failedProcessing), NO_EXTRAS);
+      expect(card.failure?.lastSuccess).toBe("There is no earlier processed result.");
+    });
+  });
+
+  describe("the next scheduled review", () => {
+    it("says a review time that has passed is overdue, not the next review", () => {
+      const card = profileCard(profile({ nextReviewAt: "2026-09-30T09:00:00.000Z" }), NO_EXTRAS);
+      expect(card.facts[2]).toEqual({
+        label: "Next scheduled review",
+        value: "Overdue since 30 Sep 2026, 04:00 (America/Chicago). It runs at the next hourly run.",
+      });
+    });
+
+    it("says reviews are paused until the capacity resets, with the reason", () => {
+      const schedule = { paused: true, resumesAt: "2026-10-01T00:00:00.000Z" };
+      for (const nextReviewAt of ["2026-09-30T09:00:00.000Z", "2026-10-01T14:00:00.000Z"]) {
+        const card = profileCard(profile({ nextReviewAt }), { ...NO_EXTRAS, schedule });
+        expect(card.facts[2]).toEqual({
+          label: "Next scheduled review",
+          value: "Paused until 30 Sep 2026, 19:00 (America/Chicago): the service reached its daily job capacity.",
+        });
+      }
+    });
+
+    it("keeps a paused profile paused, whatever the capacity", () => {
+      const card = profileCard(profile({ status: "paused", pausedAt: NOW.toISOString(), nextReviewAt: null }), {
+        ...NO_EXTRAS,
+        schedule: { paused: true, resumesAt: "2026-10-01T00:00:00.000Z" },
+      });
+      expect(card.facts[2]).toEqual({ label: "Next scheduled review", value: "Paused" });
+    });
   });
 
   it("has a paused state with the reason and no next review", () => {
@@ -402,5 +525,20 @@ describe("profileQuota", () => {
       text: "3 of 3 profiles used. Remove a profile to add another.",
       full: true,
     });
+  });
+});
+
+describe("schedulePause", () => {
+  it("says scheduled reviews are paused, why, and when they resume", () => {
+    expect(schedulePause({ paused: true, resumesAt: "2026-10-01T00:00:00.000Z" }, ZONE)).toEqual({
+      title: "Scheduled reviews are paused",
+      detail:
+        "The service reached its daily job capacity. Reviews, and the processing of new imports, resume at 30 Sep 2026, 19:00 (America/Chicago). Your stored imports and results are unchanged.",
+    });
+  });
+
+  it("says nothing while scheduled work runs", () => {
+    expect(schedulePause({ paused: false, resumesAt: null }, ZONE)).toBeNull();
+    expect(schedulePause(null, ZONE)).toBeNull();
   });
 });

@@ -10,7 +10,7 @@ import { getEnv } from "@/server/env";
 import { LAST_TICK_STATE_KEY } from "@/server/http/health";
 import { mailDelivery } from "@/server/mail/transport";
 
-import { consentSatisfied, getConsentState } from "./consent";
+import { consentSatisfied, getConsentStates } from "./consent";
 import type { AdminUserDto, CapacityDto, Page, TickSummaryDto } from "./contracts";
 import { containsPattern, notFound, type PageRequest, pageWindow, searchText, toPage } from "./shared";
 import { databasePaused, GLOBAL_SCOPE, readDatabaseSize, userScope, utcDay } from "./usage";
@@ -126,9 +126,11 @@ export async function listUsers(
   const jobsBy = new Map(jobs.map((row) => [row.userId, row.n]));
   const activityBy = new Map(activity.map((row) => [row.userId, row.last]));
 
+  const consentBy = await getConsentStates(ids, db);
+
   const data: AdminUserDto[] = [];
   for (const row of rows) {
-    const consent = await getConsentState(row.id, db);
+    const consent = consentBy.get(row.id) ?? { terms: null, privacy: null, marketing: null };
     data.push({
       id: row.id,
       email: row.email,

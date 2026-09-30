@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { CONSENT_VERSIONS } from "@/domain/limits";
 import { getDb, type Executor } from "@/server/db/client";
@@ -27,30 +27,44 @@ const KINDS: readonly ConsentKind[] = ["terms", "privacy", "marketing"];
 /** The kinds a user must have granted, at the current version, to use the product. */
 export const REQUIRED_CONSENT: readonly ("terms" | "privacy")[] = ["terms", "privacy"];
 
-/** The latest row of each kind for one user. A kind with no row is null. */
-export async function getConsentState(userId: string, executor: Executor = getDb()): Promise<ConsentStateDto> {
+/**
+ * The latest row of each kind for each of the given users, in one statement
+ * that reads one row per user and kind however long the log is. A user with no
+ * row of a kind has null there; every id given is in the result.
+ */
+export async function getConsentStates(
+  userIds: readonly string[],
+  executor: Executor = getDb(),
+): Promise<Map<string, ConsentStateDto>> {
+  const states = new Map<string, ConsentStateDto>();
+  for (const id of userIds) states.set(id, { terms: null, privacy: null, marketing: null });
+  if (states.size === 0) return states;
   const rows = await executor
-    .select({
+    .selectDistinctOn([consentRecord.userId, consentRecord.kind], {
+      userId: consentRecord.userId,
       kind: consentRecord.kind,
       version: consentRecord.version,
       granted: consentRecord.granted,
       recordedAt: consentRecord.recordedAt,
     })
     .from(consentRecord)
-    .where(eq(consentRecord.userId, userId))
-    .orderBy(desc(consentRecord.recordedAt), desc(consentRecord.id));
-  const state: ConsentStateDto = { terms: null, privacy: null, marketing: null };
-  for (const kind of KINDS) {
-    const latest = rows.find((row) => row.kind === kind);
-    if (latest) {
-      state[kind] = {
-        granted: latest.granted === true,
-        version: latest.version,
-        recordedAt: latest.recordedAt.toISOString(),
-      };
-    }
+    .where(inArray(consentRecord.userId, [...states.keys()]))
+    .orderBy(consentRecord.userId, consentRecord.kind, desc(consentRecord.recordedAt), desc(consentRecord.id));
+  for (const row of rows) {
+    const state = states.get(row.userId);
+    if (!state || !KINDS.includes(row.kind as ConsentKind)) continue;
+    state[row.kind as ConsentKind] = {
+      granted: row.granted === true,
+      version: row.version,
+      recordedAt: row.recordedAt.toISOString(),
+    };
   }
-  return state;
+  return states;
+}
+
+/** The latest row of each kind for one user. A kind with no row is null. */
+export async function getConsentState(userId: string, executor: Executor = getDb()): Promise<ConsentStateDto> {
+  return (await getConsentStates([userId], executor)).get(userId) ?? { terms: null, privacy: null, marketing: null };
 }
 
 /** Kinds of required consent that are not granted at the current version. Empty means product use is allowed. */

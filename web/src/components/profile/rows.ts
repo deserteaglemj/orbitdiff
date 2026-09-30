@@ -1,8 +1,16 @@
+import {
+  comparisonExtent,
+  NOTHING_COMPARED,
+  NOTHING_COMPARED_REASON,
+  partlyCompared,
+} from "@/components/comparison-copy";
 import { coverageDetail } from "@/components/dashboard/card-model";
 import { formatLocalDateTime, formatLocalTime, zoneLabel } from "@/components/dashboard/local-time";
 import { buildHref, firstValue, type QueryValue } from "@/components/dashboard/query";
 import { formatCount, UNKNOWN } from "@/components/ui/format";
+import { comparability } from "@/domain/export/snapshot";
 import type {
+  ComparisonRecord,
   CountHistoryDto,
   ExportEventDto,
   ExportEventType,
@@ -107,7 +115,29 @@ export function changeRow(event: ExportEventDto, timeZone: string): ChangeRow {
   };
 }
 
-export type ChangesKind = "no_import" | "undated" | "baseline" | "pending" | "none_observed" | "no_match" | "list";
+export type ChangesKind =
+  | "no_import"
+  | "undated"
+  | "baseline"
+  | "pending"
+  | "not_comparable"
+  | "none_observed"
+  | "no_match"
+  | "list";
+
+/**
+ * Which comparisons the stored imports allow, worked out from their coverage
+ * with the rules the derive job uses (see comparability in the export domain).
+ */
+export function snapshotComparison(snapshots: readonly SnapshotDto[]): ComparisonRecord {
+  return comparability(
+    snapshots.map((snapshot) => ({
+      capturedAt: snapshot.capturedAt,
+      followers: snapshot.coverage.followers,
+      following: snapshot.coverage.following,
+    })),
+  );
+}
 
 export interface ChangesState {
   kind: ChangesKind;
@@ -134,6 +164,13 @@ export function changesState(input: {
   timeZone: string;
   /** True while the newest import has not been processed, so the stored observations are of an earlier state. */
   processing?: boolean;
+  /** True when processing the newest import failed and nothing processed it since (ProfileDto.processingFailure). */
+  processingFailed?: boolean;
+  /**
+   * Which comparisons the dated imports allowed (see snapshotComparison). Without
+   * it, "no differences" is said with the general rule only.
+   */
+  comparison?: ComparisonRecord | null;
 }): ChangesState {
   if (input.snapshots === 0) {
     return {
@@ -163,11 +200,35 @@ export function changesState(input: {
       detail: "Each row is a difference between two of your dated exports, not a moment at which something happened.",
     };
   }
+  if (input.processing && input.processingFailed) {
+    return {
+      kind: "pending",
+      title: "Processing failed",
+      detail:
+        "Processing the newest import failed. It is tried again once a day. What differs between your dated exports is shown here once it has been processed.",
+    };
+  }
   if (input.processing) {
     return {
       kind: "pending",
       title: "Processing import",
       detail: "The newest import is still being processed. What differs between your dated exports is shown here when processing finishes.",
+    };
+  }
+  const extent = input.comparison ? comparisonExtent(input.comparison) : null;
+  if (extent === "none") {
+    // Nothing could be checked, so a filter could not match anything either: say why.
+    const span =
+      input.first !== null && input.last !== null
+        ? `between ${formatLocalDateTime(input.first, input.timeZone)} and ${formatLocalDateTime(
+            input.last,
+            input.timeZone,
+          )} (${zoneLabel(input.timeZone)})`
+        : "between your dated imports";
+    return {
+      kind: "not_comparable",
+      title: NOTHING_COMPARED,
+      detail: `${NOTHING_COMPARED} ${span}. ${NOTHING_COMPARED_REASON}`,
     };
   }
   if (input.filtered) {
@@ -181,10 +242,11 @@ export function changesState(input: {
     input.first !== null && input.last !== null
       ? `observed ${interval(input.first, input.last, input.timeZone)}`
       : "observed in your export between your dated imports";
+  const scope = extent === "partial" && input.comparison ? partlyCompared(input.comparison) : ".";
   return {
     kind: "none_observed",
     title: "No differences observed",
-    detail: `No differences were ${between}. An addition is reported only when the earlier export's direction is complete, and a removal only when the later export's direction is complete.`,
+    detail: `No differences were ${between}${scope} An addition is reported only when the earlier export's direction is complete, and a removal only when the later export's direction is complete.`,
   };
 }
 

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { CONSENT_VERSIONS } from "@/domain/limits";
+import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
 import { closeDb, getDb } from "@/server/db/client";
 import { consentRecord, user } from "@/server/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -214,5 +214,70 @@ describe("recordMarketingConsent: a withdrawal needs no version and is never ref
       `${CONSENT_VERSIONS.marketing}:false:signup`,
       `${CONSENT_VERSIONS.marketing}:true:settings`,
     ]);
+  });
+});
+
+/**
+ * The log is append-only and shared storage, so a caller must not be able to
+ * grow it without bound: a choice that changes nothing writes nothing, and
+ * grants are limited per UTC day. A withdrawal is never refused.
+ */
+describe("recordMarketingConsent: the log grows only when the choice changes", () => {
+  const grant = { granted: true, version: CONSENT_VERSIONS.marketing } as const;
+  const DAY = 86_400_000;
+
+  it("writes nothing for a withdrawal while product news is already off", async () => {
+    const account = await atlas();
+    const before = await rowsOf(account.userId);
+
+    for (let index = 0; index < 5; index += 1) {
+      const state = await record(account.userId, { granted: false });
+      expect(state.marketing).toMatchObject({ granted: false });
+    }
+
+    expect(await rowsOf(account.userId)).toEqual(before);
+    expect(await optedIn(account.userId)).toBe(false);
+  });
+
+  it("writes one row for a grant repeated at the same version", async () => {
+    const account = await atlas();
+
+    for (let index = 0; index < 5; index += 1) await record(account.userId, grant);
+
+    expect(await marketingLog(account.userId)).toEqual([
+      `${CONSENT_VERSIONS.marketing}:false:signup`,
+      `${CONSENT_VERSIONS.marketing}:true:settings`,
+    ]);
+    expect(await optedIn(account.userId)).toBe(true);
+  });
+
+  it(`accepts at most ${LIMITS.marketingGrantsPerUserPerDay} grants a UTC day and never refuses a withdrawal`, async () => {
+    const account = await atlas();
+    for (let index = 0; index < LIMITS.marketingGrantsPerUserPerDay; index += 1) {
+      if (index > 0) await record(account.userId, { granted: false });
+      await record(account.userId, grant);
+    }
+    // The last allowed grant is in force. Turning product news off still works.
+    const withdrawn = await record(account.userId, { granted: false });
+    expect(withdrawn.marketing).toMatchObject({ granted: false });
+    const before = await rowsOf(account.userId);
+
+    const refused = await record(account.userId, grant).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(refused).toBeInstanceOf(AppError);
+    expect(refused).toMatchObject({ code: "quota_exhausted", details: { quota: "marketing_grants" } });
+    expect(await rowsOf(account.userId)).toEqual(before);
+    expect(await optedIn(account.userId)).toBe(false);
+    expect(await record(account.userId, { granted: false })).toMatchObject({ marketing: { granted: false } });
+
+    // The next UTC day it can be turned on again.
+    const nextDay = await recordMarketingConsent(account.userId, grant, new Date(NOW.getTime() + DAY));
+    expect(nextDay.marketing).toMatchObject({ granted: true });
+    expect((await rowsOf(account.userId)).filter((row) => row.kind === "marketing")).toHaveLength(
+      1 + 2 * LIMITS.marketingGrantsPerUserPerDay + 1,
+    );
   });
 });

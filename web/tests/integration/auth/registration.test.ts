@@ -3,12 +3,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { CONSENT_VERSIONS } from "@/domain/limits";
 import { getAuth } from "@/server/auth/auth";
+import { getRegistrationState } from "@/server/auth/registration";
 import { closeDb, getDb } from "@/server/db/client";
 import { account, consentRecord, mailCapture, user } from "@/server/db/schema";
 import { getEnv } from "@/server/env";
 import { settleBackground } from "@/server/http/background";
 
-import { authRequest, openVerificationLink, signIn, signUp } from "../../helpers/auth";
+import { authRequest, createVerifiedUser, openVerificationLink, signIn, signUp } from "../../helpers/auth";
 import { resetDatabase } from "../../helpers/db";
 import { restoreTestEnv, setTestEnv } from "../../helpers/env";
 import { latestMail } from "../../helpers/mail";
@@ -73,9 +74,9 @@ describe("registration gate", () => {
     expect(await userCount()).toBe(0);
   });
 
-  it("is paused when the number of users has reached capacity", async () => {
+  it("is paused when the number of verified users has reached capacity", async () => {
     setTestEnv({ CAPACITY_MAX_USERS: "1" });
-    expect((await signUp({ email: "atlas@orbitdiff.test" })).status).toBe(200);
+    await createVerifiedUser({ email: "atlas@orbitdiff.test" });
     const response = await signUp({ email: "nova@orbitdiff.test" });
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
@@ -83,6 +84,41 @@ describe("registration gate", () => {
       message: "Registration is paused: capacity reached.",
     });
     expect(await userCount()).toBe(1);
+  });
+
+  it("is not paused by sign-ups that were never verified", async () => {
+    setTestEnv({ CAPACITY_MAX_USERS: "3" });
+    for (const name of ["stranger1", "stranger2", "stranger3"]) {
+      expect((await signUp({ email: `${name}@orbitdiff.test` })).status).toBe(200);
+    }
+    expect(await getRegistrationState()).toMatchObject({ open: true, reason: null });
+    const invitee = await signUp({ email: "atlas@orbitdiff.test" });
+    expect(invitee.status).toBe(200);
+    // The invitee can finish: the unverified sign-ups took no place.
+    const opened = await openVerificationLink("atlas@orbitdiff.test");
+    expect((await signIn({ email: "atlas@orbitdiff.test", cookie: opened.cookie })).status).toBe(200);
+  });
+
+  it("keeps at most as many unverified accounts as there are places, removing the oldest first", async () => {
+    setTestEnv({ CAPACITY_MAX_USERS: "2" });
+    await createVerifiedUser({ email: "nova@orbitdiff.test" });
+    expect((await signUp({ email: "stranger1@orbitdiff.test" })).status).toBe(200);
+    await getDb()
+      .update(user)
+      .set({ createdAt: new Date(Date.now() - 60_000) })
+      .where(eq(user.email, "stranger1@orbitdiff.test"));
+    expect((await signUp({ email: "stranger2@orbitdiff.test" })).status).toBe(200);
+
+    expect((await signUp({ email: "atlas@orbitdiff.test" })).status).toBe(200);
+
+    const rows = await getDb().select({ email: user.email, emailVerified: user.emailVerified }).from(user);
+    expect(rows.filter((row) => !row.emailVerified).map((row) => row.email).sort()).toEqual([
+      "atlas@orbitdiff.test",
+      "stranger2@orbitdiff.test",
+    ]);
+    // A verified account is never removed to make room, and the removed one leaves no mail behind.
+    expect(rows.filter((row) => row.emailVerified).map((row) => row.email)).toEqual(["nova@orbitdiff.test"]);
+    expect(await latestMail("stranger1@orbitdiff.test", "verify_email")).toBeFalsy();
   });
 
   it("requires the access code when one is configured", async () => {

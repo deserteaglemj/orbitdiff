@@ -11,7 +11,7 @@ import type { CapacityDto, TickSummaryDto } from "@/server/services/contracts";
 export interface CapacityItem {
   key: "users" | "jobsToday" | "database" | "mail" | "registration" | "lastTick";
   title: string;
-  /** The reading itself, for example "12 of 250 accounts". */
+  /** The reading itself, for example "12 of 250 verified accounts". */
   value: string;
   /** The state in one or two words. */
   badge: string;
@@ -46,12 +46,13 @@ function users(capacity: CapacityDto): CapacityItem {
   const state = capState(used, limit, paused);
   return {
     key: "users",
-    title: "Accounts",
-    value: `${formatCount(used)} of ${formatCount(limit)} accounts`,
+    // Only verified accounts take a place under the cap (see countUsers).
+    title: "Verified accounts",
+    value: `${formatCount(used)} of ${formatCount(limit)} verified accounts`,
     ...state,
     detail: state.paused
-      ? "Registration is paused: the account cap is reached. Existing accounts are not affected."
-      : "The cap is not reached, so it does not pause registration.",
+      ? "Registration is paused: the cap on verified accounts is reached. Existing accounts are not affected."
+      : "The cap is not reached, so it does not pause registration. Accounts that wait for verification do not count.",
     facts: [],
   };
 }

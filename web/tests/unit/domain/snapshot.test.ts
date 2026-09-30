@@ -9,6 +9,8 @@ import { captureTimeMillis, formatCaptureTime } from "@/domain/capture-time";
 import { DomainError, isDomainError } from "@/domain/errors";
 import {
   buildView,
+  comparability,
+  coverage,
   decideImport,
   deriveEvents,
   type HistoryEntry,
@@ -116,6 +118,74 @@ describe("hosted event bound", () => {
     expect(events).toHaveLength(LIMITS.eventsPerProfile);
     expect(events[0]).toMatchObject({ type: "follower_observed_added", username: "u000000" });
     expect(new Set(events.map((event) => event.digest)).size).toBe(events.length);
+  });
+});
+
+describe("comparability", () => {
+  const list = (present: boolean, complete = false) => ({ present, complete });
+  const exported = (capturedAt: string | null, followers = list(true), following = list(true)) => ({
+    capturedAt,
+    followers,
+    following,
+  });
+  const none = { added: 0, removed: 0 };
+
+  it("has no pair to compare before a second dated export", () => {
+    expect(comparability([])).toEqual({ pairs: 0, followers: none, following: none });
+    expect(comparability([exported(dated(1), list(true, true), list(true, true)), exported(null)])).toEqual({
+      pairs: 0,
+      followers: none,
+      following: none,
+    });
+  });
+
+  it("can check nothing between two exports whose lists were not declared complete", () => {
+    expect(comparability([exported(dated(1)), exported(dated(10))])).toEqual({ pairs: 1, followers: none, following: none });
+  });
+
+  it("checks additions when the earlier list is complete, and removals when the later list is", () => {
+    const earlierComplete = [exported(dated(1), list(true, true)), exported(dated(10), list(true))];
+    expect(comparability(earlierComplete)).toEqual({ pairs: 1, followers: { added: 1, removed: 0 }, following: none });
+    const laterComplete = [exported(dated(1), list(true)), exported(dated(10), list(true, true))];
+    expect(comparability(laterComplete)).toEqual({ pairs: 1, followers: { added: 0, removed: 1 }, following: none });
+  });
+
+  it("needs the list in both exports, however complete one of them is", () => {
+    const missingLater = [exported(dated(1), list(true, true), list(true, true)), exported(dated(10), list(false), list(true, true))];
+    expect(comparability(missingLater)).toEqual({ pairs: 1, followers: none, following: { added: 1, removed: 1 } });
+  });
+
+  it("compares consecutive exports in capture order and leaves undated ones out", () => {
+    const history = [
+      exported(dated(20), list(true, true)),
+      exported(null, list(true, true)),
+      exported(dated(1), list(true, true)),
+      exported(dated(10), list(true)),
+    ];
+    // 1 Aug (complete) -> 10 Aug (partial): additions only. 10 Aug -> 20 Aug (complete): removals only.
+    expect(comparability(history)).toEqual({ pairs: 2, followers: { added: 1, removed: 1 }, following: none });
+  });
+
+  it("agrees with the observations deriveEvents reports", async () => {
+    const earlier: Snapshot = {
+      followers: ["nova_labs", "pixel_forge"],
+      following: null,
+      shards: { followers: [0], following: [] },
+      capturedAt: "2026-09-01T12:00:00+00:00",
+      declarations: { followers: false, following: false },
+    };
+    const later: Snapshot = { ...earlier, followers: ["ember_lab", "nova_labs"], capturedAt: "2026-09-10T12:00:00+00:00" };
+    const snapshots = await Promise.all([identifySnapshot("atlas_studio", earlier), identifySnapshot("atlas_studio", later)]);
+    expect(await deriveEvents(snapshots)).toEqual([]);
+    expect(
+      comparability(
+        snapshots.map((snapshot) => ({
+          capturedAt: snapshot.capturedAt,
+          followers: coverage(snapshot, "followers"),
+          following: coverage(snapshot, "following"),
+        })),
+      ),
+    ).toEqual({ pairs: 1, followers: none, following: none });
   });
 });
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { getDb, type Executor } from "@/server/db/client";
 import { user } from "@/server/db/schema";
@@ -22,8 +22,17 @@ export interface RegistrationState {
   accessCodeRequired: boolean;
 }
 
+/**
+ * The accounts that take a place under CAPACITY_MAX_USERS: verified ones. A
+ * sign-up that was never verified takes no place, so nobody can close
+ * registration by registering addresses they cannot read. Unverified accounts
+ * are bounded separately (see makeRoomForPendingAccount).
+ */
 export async function countUsers(executor: Executor = getDb()): Promise<number> {
-  const [row] = await executor.select({ n: sql<number>`count(*)::int` }).from(user);
+  const [row] = await executor
+    .select({ n: sql<number>`count(*)::int` })
+    .from(user)
+    .where(eq(user.emailVerified, true));
   return row?.n ?? 0;
 }
 
@@ -42,8 +51,9 @@ export function namedOperator(env: Pick<Env, "operatorName">): string | null {
  * sign-up gate, the health endpoint, and the interface.
  *
  * Order: the operator must be named (the owner's rule, in every stage), then
- * mail must be deliverable, then there must be capacity. The access code and
- * the consent checks follow in the sign-up gate.
+ * mail must be deliverable, then there must be capacity: fewer verified
+ * accounts than CAPACITY_MAX_USERS. The access code and the consent checks
+ * follow in the sign-up gate.
  */
 export async function getRegistrationState(
   env: Env = getEnv(),

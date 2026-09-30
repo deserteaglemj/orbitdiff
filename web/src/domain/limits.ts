@@ -25,14 +25,26 @@ export const LIMITS = {
   reviewCooldownMs: 30 * 60 * 1000,
   /** Manual reviews per profile per UTC day. */
   manualReviewsPerProfilePerDay: 3,
+  /** Times a profile may be resumed per UTC day. Pausing is never limited. */
+  resumesPerProfilePerDay: 5,
+  /** Product news grants per user per UTC day. Withdrawing is never limited. */
+  marketingGrantsPerUserPerDay: 5,
+  /** Sign-in sessions kept per account. A new sign-in ends the oldest beyond this. */
+  sessionsPerUser: 20,
+  /** Characters of the browser's User-Agent header kept with a session. */
+  sessionUserAgentChars: 256,
   /** Attempts before a job is marked failed. */
   jobMaxAttempts: 3,
   /** Backoff before attempt 2 and attempt 3. */
   jobBackoffMs: [5 * 60 * 1000, 30 * 60 * 1000],
   /** Lease held by a worker on a running job. */
   jobLeaseMs: 120 * 1000,
-  /** Jobs drained by one tick, worker concurrency, and the time budget of one tick. */
-  tickMaxJobs: 25,
+  /**
+   * Jobs drained by one tick, worker concurrency, and the time budget of one tick.
+   * 24 hourly ticks can run more than the default daily job capacity, so the count
+   * is not what holds scheduled reviews back; the time budget bounds one tick.
+   */
+  tickMaxJobs: 200,
   tickConcurrency: 3,
   tickBudgetMs: 45 * 1000,
   /** An export older than this, or undated, is stale. */
@@ -42,6 +54,7 @@ export const LIMITS = {
   retainActivityDays: 400,
   retainUnverifiedAccountDays: 7,
   retainCapturedMailDays: 7,
+  retainAuditDays: 90,
   /** Page size bounds for list endpoints. */
   pageSizeDefault: 25,
   pageSizeMax: 100,

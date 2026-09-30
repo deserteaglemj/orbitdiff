@@ -9,6 +9,7 @@ import { getDb, type Database } from "@/server/db/client";
 import * as schema from "@/server/db/schema";
 import { getEnv, type Env } from "@/server/env";
 import { runInBackground } from "@/server/http/background";
+import { logError } from "@/server/http/log";
 import { sendMail } from "@/server/mail/transport";
 
 import { recordAuthEvent } from "./audit";
@@ -18,6 +19,7 @@ import { authGate } from "./gate";
 import { isRecord } from "./gate-context";
 import { authLog } from "./log";
 import { authSchemaOptions } from "./options";
+import { boundedUserAgent, endSessionsBeyondLimit } from "./sessions";
 import { refuseLoginForSuspended } from "./suspension";
 
 function verificationText(url: string): string {
@@ -186,8 +188,19 @@ export function createAuth(overrides: AuthOverrides = {}) {
     databaseHooks: {
       session: {
         create: {
+          // A session stores at most a bounded part of the User-Agent header.
           before: async (created) => {
             await refuseLoginForSuspended(created.userId);
+            return { data: { userAgent: boundedUserAgent(created.userAgent) } };
+          },
+          // An account keeps at most LIMITS.sessionsPerUser sessions: a new sign-in ends the oldest.
+          after: async (created) => {
+            try {
+              await endSessionsBeyondLimit(created.userId, created.id);
+            } catch (error) {
+              // The sign-in itself succeeded; the next one tries again.
+              logError("auth.sessions", error);
+            }
           },
         },
       },

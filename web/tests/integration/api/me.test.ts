@@ -114,6 +114,16 @@ describe("PATCH /api/me", () => {
     await expectError(await patch(atlas.cookie, { timezone: "+02:00" }), 422, "invalid_input");
   });
 
+  it("stores a timezone written in another case under its canonical name", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    for (const variant of ["europe/berlin", "EUROPE/BERLIN", "eUrOpE/bErLiN"]) {
+      const response = await patch(atlas.cookie, { timezone: variant });
+      expect(response.status).toBe(200);
+      expect((await response.json()).timezone).toBe("Europe/Berlin");
+      expect((await userRow(atlas.userId)).timezone).toBe("Europe/Berlin");
+    }
+  });
+
   it("answers 403 without an Origin header", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS, name: "Atlas" });
     await expectError(await patch(atlas.cookie, { name: "Changed" }, null), 403, "forbidden_origin");

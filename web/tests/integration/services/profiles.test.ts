@@ -184,6 +184,97 @@ describe("getProfile", () => {
     expect(found.metrics).toBeNull();
   });
 
+  it("names the export the numbers describe while a newer import waits for processing", async () => {
+    const atlas = await atlasUser();
+    const created = await createProfile(atlas.userId, "atlas_studio", NOW);
+    const older = await addSnapshot(atlas.userId, created.id, { capturedAt: new Date("2026-09-01T12:00:00Z") });
+    await getDb().update(profile).set({ contentRevision: 1 }).where(eq(profile.id, created.id));
+    await markDerived(created.id);
+    expect((await getProfile(atlas.userId, created.id, NOW)).processed).toEqual({
+      snapshotId: older,
+      capturedAt: "2026-09-01T12:00:00+00:00",
+      evidence: "stale",
+    });
+    // A newer import becomes current, and its processing has not run yet.
+    await getDb().update(exportSnapshot).set({ isCurrent: false }).where(eq(exportSnapshot.id, older));
+    const newer = await addSnapshot(atlas.userId, created.id, { capturedAt: new Date("2026-09-30T11:00:00Z") });
+    await getDb().update(profile).set({ contentRevision: 2 }).where(eq(profile.id, created.id));
+
+    const found = await getProfile(atlas.userId, created.id, NOW);
+
+    expect(found).toMatchObject({
+      processing: true,
+      currentSnapshotId: newer,
+      capturedAt: "2026-09-30T11:00:00+00:00",
+      evidence: "ok",
+      processed: { snapshotId: older, capturedAt: "2026-09-01T12:00:00+00:00", evidence: "stale" },
+    });
+  });
+
+  it("has no processed export before the first import is processed", async () => {
+    const atlas = await atlasUser();
+    const created = await createProfile(atlas.userId, "atlas_studio", NOW);
+    await addSnapshot(atlas.userId, created.id);
+    await getDb().update(profile).set({ contentRevision: 1 }).where(eq(profile.id, created.id));
+    expect((await getProfile(atlas.userId, created.id, NOW)).processed).toBeNull();
+  });
+
+  it("reports a failed processing until an import is processed, whatever reviews succeed meanwhile", async () => {
+    const atlas = await atlasUser();
+    const created = await createProfile(atlas.userId, "atlas_studio", NOW);
+    await addSnapshot(atlas.userId, created.id);
+    await getDb().update(profile).set({ contentRevision: 1 }).where(eq(profile.id, created.id));
+    const failedAt = new Date("2026-09-30T10:00:00Z");
+    const reviewedAt = new Date("2026-09-30T11:00:00Z");
+    await getDb().insert(job).values([
+      {
+        userId: atlas.userId,
+        profileId: created.id,
+        kind: "derive_profile",
+        status: "failed",
+        dedupeKey: dedupeKey.derive(created.id, 1),
+        attempts: 3,
+        lastErrorCode: "handler_error",
+        createdAt: new Date("2026-09-30T09:00:00Z"),
+        finishedAt: failedAt,
+      },
+      {
+        userId: atlas.userId,
+        profileId: created.id,
+        kind: "daily_review",
+        status: "succeeded",
+        dedupeKey: dedupeKey.daily(created.id, "2026-09-30"),
+        attempts: 1,
+        createdAt: reviewedAt,
+        finishedAt: reviewedAt,
+      },
+    ]);
+    // The review succeeded after the failure. It processes no import.
+    await getDb()
+      .update(profile)
+      .set({ lastFailureAt: failedAt, lastFailureCode: "handler_error", lastSuccessAt: reviewedAt, lastReviewAt: reviewedAt })
+      .where(eq(profile.id, created.id));
+
+    const failed = await getProfile(atlas.userId, created.id, NOW);
+    expect(failed).toMatchObject({
+      processing: true,
+      activeJob: null,
+      processingFailure: { failedAt: failedAt.toISOString(), code: "handler_error" },
+    });
+
+    // A new attempt is queued: the failure still stands until it succeeds.
+    await enqueueJob(getDb(), {
+      userId: atlas.userId,
+      profileId: created.id,
+      kind: "derive_profile",
+      dedupeKey: `${dedupeKey.derive(created.id, 1)}:repair:2026-09-30`,
+    });
+    expect((await getProfile(atlas.userId, created.id, NOW)).processingFailure).not.toBeNull();
+
+    await markDerived(created.id);
+    expect(await getProfile(atlas.userId, created.id, NOW)).toMatchObject({ processing: false, processingFailure: null });
+  });
+
   it("shows the derived summary once the revisions match", async () => {
     const atlas = await atlasUser();
     const created = await createProfile(atlas.userId, "atlas_studio", NOW);
@@ -337,6 +428,27 @@ describe("setProfileStatus", () => {
   it("answers not_found for an id that does not exist", async () => {
     const atlas = await atlasUser();
     expect((await thrown(() => setProfileStatus(atlas.userId, RANDOM_ID, "paused", NOW))).code).toBe("not_found");
+  });
+
+  it(`allows ${LIMITS.resumesPerProfilePerDay} resumes of a profile a UTC day and always lets it pause`, async () => {
+    const atlas = await atlasUser();
+    const created = await createProfile(atlas.userId, "atlas_studio", NOW);
+    for (let index = 0; index < LIMITS.resumesPerProfilePerDay; index += 1) {
+      await setProfileStatus(atlas.userId, created.id, "paused", NOW);
+      await setProfileStatus(atlas.userId, created.id, "active", NOW);
+    }
+    // Pausing is never limited.
+    expect(await setProfileStatus(atlas.userId, created.id, "paused", NOW)).toMatchObject({ status: "paused" });
+    const entries = (await activityKinds(atlas.userId)).length;
+
+    const error = await thrown(() => setProfileStatus(atlas.userId, created.id, "active", NOW));
+
+    expect(error).toMatchObject({ code: "quota_exhausted", details: { quota: "resumes", limit: LIMITS.resumesPerProfilePerDay } });
+    expect(await rowOf(created.id)).toMatchObject({ status: "paused" });
+    expect(await activityKinds(atlas.userId)).toHaveLength(entries);
+    // The next UTC day it can be resumed again.
+    const nextDay = new Date(NOW.getTime() + 86_400_000);
+    expect(await setProfileStatus(atlas.userId, created.id, "active", nextDay)).toMatchObject({ status: "active" });
   });
 });
 

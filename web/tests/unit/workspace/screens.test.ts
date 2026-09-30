@@ -136,3 +136,40 @@ describe("a profile page", () => {
     expect(noticeTexts(html).filter((text) => /stale|Coverage is incomplete/.test(text))).toEqual([]);
   });
 });
+
+describe("a profile page while a newer import waits for processing", () => {
+  // The numbers come from the processed export captured on 1 Jun; a new one captured an hour ago waits.
+  const waiting: Partial<ProfileDto> = {
+    processing: true,
+    evidence: "ok",
+    currentSnapshotId: "5c0e7b1a-2d3f-4a5b-8c6d-7e8f9a0b1c2d",
+    capturedAt: "2026-09-30T11:00:00+00:00",
+    processed: { snapshotId: "9d1f6a52-0c3b-4f7e-8a21-5b6c7d8e9f01", capturedAt: OLD_CAPTURE, evidence: "stale" },
+  };
+
+  it("describes the export the numbers come from, not the waiting one", () => {
+    const html = profilePage(waiting);
+    expect(badgeTexts(html)).toEqual(["Stale", "Processing import"]);
+    expect(html).toContain("Owner export, captured 1 Jun 2026, 12:00 (UTC)");
+    expect(noticeTexts(html)).toContain(
+      `Warning: The current export is stale. ${STALE_NOTE} The numbers below describe that export, not today.`,
+    );
+  });
+});
+
+describe("a profile page after processing failed", () => {
+  it("shows the failure even when a review succeeded after it", () => {
+    const html = profilePage({
+      processing: true,
+      activeJob: null,
+      processingFailure: { failedAt: "2026-09-30T10:00:00.000Z", code: "handler_error" },
+      lastFailureAt: "2026-09-30T10:00:00.000Z",
+      lastFailureCode: "handler_error",
+      lastSuccessAt: "2026-09-30T11:00:00.000Z",
+      lastReviewAt: "2026-09-30T11:00:00.000Z",
+    });
+    const notices = noticeTexts(html);
+    expect(notices.some((text) => text.includes("Processing an import failed"))).toBe(true);
+    expect(badgeTexts(html)).toContain("Processing failed");
+  });
+});

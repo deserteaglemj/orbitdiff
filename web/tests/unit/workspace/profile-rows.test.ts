@@ -11,6 +11,7 @@ import {
   RELATIONSHIP_OPTIONS,
   relationshipRow,
   removalDescription,
+  snapshotComparison,
   snapshotRow,
   tabHref,
   triState,
@@ -207,10 +208,124 @@ describe("changesState", () => {
     expect(state.detail).toContain("when processing finishes");
   });
 
+  it("says processing failed, not that it is still running, when the newest import could not be processed", () => {
+    const state = changesState({
+      snapshots: 2,
+      dated: 2,
+      events: 0,
+      filtered: false,
+      ...range,
+      timeZone: ZONE,
+      processing: true,
+      processingFailed: true,
+    });
+    expect(state).toMatchObject({ kind: "pending", title: "Processing failed" });
+    expect(state.detail).toContain("It is tried again once a day.");
+    expect(state.detail).not.toContain("still being processed");
+  });
+
   it("is a list as soon as there are observations to show", () => {
     expect(changesState({ snapshots: 2, dated: 2, events: 2, filtered: false, ...range, timeZone: ZONE }).kind).toBe(
       "list",
     );
+  });
+
+  const none = { added: 0, removed: 0 };
+  const nothingComparable = { pairs: 1, followers: none, following: none };
+
+  it("says nothing could be compared when no list was complete where a comparison needs it", () => {
+    const state = changesState({
+      snapshots: 2,
+      dated: 2,
+      events: 0,
+      filtered: false,
+      ...range,
+      timeZone: ZONE,
+      comparison: nothingComparable,
+    });
+    expect(state.kind).toBe("not_comparable");
+    expect(state.title).toBe("Nothing could be compared");
+    expect(state.detail).not.toContain("No differences");
+    expect(state.detail).toContain("between 20 Sep 2026, 12:00 and 27 Sep 2026, 12:00 (America/Chicago)");
+    expect(state.detail).toContain("whether anything differs is unknown");
+  });
+
+  it("says nothing could be compared whatever the filter", () => {
+    const state = changesState({
+      snapshots: 2,
+      dated: 2,
+      events: 0,
+      filtered: true,
+      ...range,
+      timeZone: ZONE,
+      comparison: nothingComparable,
+    });
+    expect(state.kind).toBe("not_comparable");
+  });
+
+  it("names what was compared when only part of the lists could be compared", () => {
+    const state = changesState({
+      snapshots: 2,
+      dated: 2,
+      events: 0,
+      filtered: false,
+      ...range,
+      timeZone: ZONE,
+      comparison: { pairs: 1, followers: { added: 1, removed: 0 }, following: none },
+    });
+    expect(state.kind).toBe("none_observed");
+    expect(state.title).toBe("No differences observed");
+    expect(state.detail).toContain("in what could be compared: additions to followers.");
+    expect(state.detail).toContain("The rest could not be compared, so whether it differs is unknown.");
+  });
+
+  it("keeps the plain wording when every list could be compared", () => {
+    const full = { added: 1, removed: 1 };
+    const state = changesState({
+      snapshots: 2,
+      dated: 2,
+      events: 0,
+      filtered: false,
+      ...range,
+      timeZone: ZONE,
+      comparison: { pairs: 1, followers: full, following: full },
+    });
+    expect(state.kind).toBe("none_observed");
+    expect(state.detail).not.toContain("could not be compared");
+  });
+});
+
+describe("snapshotComparison", () => {
+  const range = { first: "2026-09-20T17:00:00+00:00", last: "2026-09-27T17:00:00+00:00" };
+  const stored = (capturedAt: string | null, complete: boolean): SnapshotDto => ({
+    id: `s-${capturedAt}`,
+    capturedAt,
+    importedAt: "2026-09-29T18:00:00.000Z",
+    isCurrent: false,
+    coverage: {
+      followers: coverage({ complete, declaredComplete: complete }),
+      following: coverage({ present: false, complete: false, declaredComplete: false, shards: [] }),
+    },
+    followers: null,
+    following: null,
+    followersObserved: 2,
+    followingObserved: null,
+    source: "instagram_export",
+  });
+
+  it("works out from the stored imports which comparisons their coverage allowed", () => {
+    // Newest first, as the import history lists them.
+    const history = [stored(range.last, false), stored(null, true), stored(range.first, false)];
+    expect(snapshotComparison(history)).toEqual({
+      pairs: 1,
+      followers: { added: 0, removed: 0 },
+      following: { added: 0, removed: 0 },
+    });
+    expect(snapshotComparison([stored(range.last, true), stored(range.first, true)])).toEqual({
+      pairs: 1,
+      followers: { added: 1, removed: 1 },
+      following: { added: 0, removed: 0 },
+    });
   });
 });
 

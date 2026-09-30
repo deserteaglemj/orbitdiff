@@ -67,3 +67,17 @@ describe("docs/web/operations.md", () => {
     expect(deployment.indexOf("node scripts/check-hosted-rules.mjs")).toBeLessThan(deploy);
   });
 });
+
+describe("docs/web/infrastructure.md", () => {
+  const infrastructure = readFileSync(path.join(WEB, "..", "docs", "web", "infrastructure.md"), "utf8");
+
+  it("names the owner's Vercel team only by a placeholder, never by its slug", () => {
+    expect(infrastructure).toContain("`<team-slug>`");
+    expect(infrastructure).not.toMatch(/team `(?!<team-slug>`)[^`]+`/);
+  });
+
+  it("does not describe resources that belong to the owner's other projects", () => {
+    expect(infrastructure).not.toMatch(/another project/);
+    expect(infrastructure).not.toMatch(/\b(Supabase|Resend)\b/);
+  });
+});

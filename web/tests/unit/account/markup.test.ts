@@ -553,7 +553,7 @@ describe("admin screen", () => {
   describe("capacity", () => {
     it("shows each reading against its cap, in words", () => {
       for (const phrase of [
-        "2 of 250 accounts",
+        "2 of 250 verified accounts",
         "150 of 2,000 jobs",
         "120 MB of 400 MB",
         "Captured",
@@ -588,7 +588,7 @@ describe("admin screen", () => {
       );
       for (const phrase of [
         "6 things are paused right now",
-        "Registration is paused: the account cap is reached.",
+        "Registration is paused: the cap on verified accounts is reached.",
         "Scheduled reviews are paused: the daily job cap is reached.",
         "Imports are paused: the measured database size has reached the cap.",
         "No account message can be stored or sent",

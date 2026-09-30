@@ -5,7 +5,9 @@ import { and, eq } from "drizzle-orm";
 import { captureTimeMillis, formatCaptureTime } from "@/domain/capture-time";
 import {
   buildView,
+  comparability,
   type Coverage,
+  coverage,
   deriveEvents,
   type ExportEvent,
   type IdentifiedSnapshot,
@@ -75,6 +77,17 @@ function processedRecord(rows: readonly SnapshotRow[], dated: number, events: re
     eventCount: events.length,
     added: { followers: 0, following: 0 },
     removed: { followers: 0, following: 0 },
+    // Whether a comparison could run at all: zero observations are "none" only when one did.
+    comparison: comparability(
+      rows.map((row) => {
+        const snapshot = toSnapshot(row);
+        return {
+          capturedAt: snapshot.capturedAt,
+          followers: coverage(snapshot, "followers"),
+          following: coverage(snapshot, "following"),
+        };
+      }),
+    ),
   };
   for (const event of events) {
     const bucket = event.type.endsWith("_added") ? record.added : record.removed;

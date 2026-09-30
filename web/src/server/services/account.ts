@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 
-import { CONSENT_VERSIONS } from "@/domain/limits";
-import { isValidTimezone } from "@/domain/schedule";
+import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
+import { canonicalTimezone } from "@/domain/schedule";
 import { isAdminEmail } from "@/server/auth/guards";
 import { getDb, type Executor } from "@/server/db/client";
 import {
@@ -107,10 +107,12 @@ export async function updateMe(userId: string, input: UpdateMeInput, now: Date =
     changes.name = name;
   }
   if (input.timezone !== undefined) {
-    if (!isValidTimezone(input.timezone)) {
+    // Stored under the one name Intl gives it, never the caller's spelling of it.
+    const zone = canonicalTimezone(input.timezone);
+    if (zone === null) {
       throw invalid("timezone", "Choose a timezone by its IANA name, for example Europe/Berlin.");
     }
-    changes.timezone = input.timezone;
+    changes.timezone = zone;
   }
   if (input.reviewHour !== undefined) {
     const hour = input.reviewHour;
@@ -175,6 +177,12 @@ function marketingVersionProblem(value: unknown): string | null {
  * for a stale page. The row records the version the server holds at that time.
  *
  * `granted` has to be a boolean. Anything else, and any other field, is refused.
+ *
+ * The log only grows when the choice changes: a choice equal to the latest row
+ * (same answer, same version) writes nothing. Grants are limited to
+ * LIMITS.marketingGrantsPerUserPerDay per UTC day (`quota_exhausted`), so the
+ * log of one account cannot be grown without bound. A withdrawal is never
+ * limited.
  */
 export async function recordMarketingConsent(
   userId: string,
@@ -208,10 +216,46 @@ export async function recordMarketingConsent(
   await db.transaction(async (tx) => {
     const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for("no key update");
     if (!owner) throw notFound();
-    await appendConsent(userId, "marketing", version, granted, "settings", now, tx);
+    const [latest] = await tx
+      .select({ granted: consentRecord.granted, version: consentRecord.version })
+      .from(consentRecord)
+      .where(and(eq(consentRecord.userId, userId), eq(consentRecord.kind, "marketing")))
+      .orderBy(desc(consentRecord.recordedAt), desc(consentRecord.id))
+      .limit(1);
+    if (!(latest && latest.granted === granted && latest.version === version)) {
+      if (granted) await assertMarketingGrantAllowed(userId, now, tx);
+      await appendConsent(userId, "marketing", version, granted, "settings", now, tx);
+    }
     await tx.update(user).set({ marketingOptIn: granted }).where(eq(user.id, userId));
   });
   return getConsentState(userId, db);
+}
+
+const DAY_MS = 86_400_000;
+
+/** Refuses a product news grant once LIMITS.marketingGrantsPerUserPerDay were recorded on the UTC day of `now`. */
+async function assertMarketingGrantAllowed(userId: string, now: Date, executor: Executor): Promise<void> {
+  const limit = LIMITS.marketingGrantsPerUserPerDay;
+  const dayStart = new Date(Math.floor(now.getTime() / DAY_MS) * DAY_MS);
+  const [counted] = await executor
+    .select({ n: sql<number>`count(*)::int` })
+    .from(consentRecord)
+    .where(
+      and(
+        eq(consentRecord.userId, userId),
+        eq(consentRecord.kind, "marketing"),
+        eq(consentRecord.granted, true),
+        eq(consentRecord.source, "settings"),
+        gte(consentRecord.recordedAt, dayStart),
+      ),
+    );
+  if ((counted?.n ?? 0) >= limit) {
+    throw new AppError(
+      "quota_exhausted",
+      `Product news can be turned on at most ${limit} times a day. Try again after midnight UTC. Turning it off always works.`,
+      { quota: "marketing_grants", limit },
+    );
+  }
 }
 
 /** The versions of the two documents the person read and accepts. Naming a version is the acceptance. */

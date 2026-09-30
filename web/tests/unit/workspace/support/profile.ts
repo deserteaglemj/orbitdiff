@@ -51,6 +51,12 @@ export function profile(overrides: Partial<ProfileDto> = {}): ProfileDto {
     lastReviewAt: null,
     nextReviewAt: "2026-10-01T14:00:00.000Z",
     activeJob: null,
+    processed: {
+      snapshotId: "9d1f6a52-0c3b-4f7e-8a21-5b6c7d8e9f01",
+      capturedAt: "2026-09-29T17:00:00+00:00",
+      evidence: "ok",
+    },
+    processingFailure: null,
     ...overrides,
   };
 }

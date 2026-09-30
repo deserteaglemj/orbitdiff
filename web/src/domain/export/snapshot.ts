@@ -604,3 +604,57 @@ export async function deriveEvents(
   }
   return events;
 }
+
+// ---------------------------------------------------------------- comparability
+
+/** What comparability needs to know of one export: its capture time and each list's coverage. */
+export interface ComparableExport {
+  capturedAt: string | null;
+  followers: { present: boolean; complete: boolean };
+  following: { present: boolean; complete: boolean };
+}
+
+/** How many consecutive dated pairs allowed each side of each direction to be checked. */
+export interface Comparability {
+  /** Pairs of consecutive dated exports. */
+  pairs: number;
+  followers: { added: number; removed: number };
+  following: { added: number; removed: number };
+}
+
+/**
+ * Which comparisons deriveEvents could run over a history, with the same rules:
+ * consecutive dated exports in capture order, undated ones left out; a direction
+ * is compared only when both exports hold its list; additions are checked only
+ * when the earlier list is complete, removals only when the later one is.
+ *
+ * deriveEvents returns no observation both when the lists are equal and when
+ * nothing could be checked. This tells the two apart, so "no difference" is
+ * said only when a comparison ran, and "unknown" is never worded as "none".
+ */
+export function comparability(exports: readonly ComparableExport[]): Comparability {
+  const dated = exports
+    .filter((entry) => entry.capturedAt !== null)
+    .sort((left, right) => captureTimeMillis(left.capturedAt as string) - captureTimeMillis(right.capturedAt as string));
+  const result: Comparability = {
+    pairs: Math.max(0, dated.length - 1),
+    followers: { added: 0, removed: 0 },
+    following: { added: 0, removed: 0 },
+  };
+  for (let index = 1; index < dated.length; index += 1) {
+    const previous = dated[index - 1] as ComparableExport;
+    const current = dated[index] as ComparableExport;
+    for (const direction of DIRECTIONS) {
+      if (!previous[direction].present || !current[direction].present) {
+        continue;
+      }
+      if (previous[direction].complete) {
+        result[direction].added += 1;
+      }
+      if (current[direction].complete) {
+        result[direction].removed += 1;
+      }
+    }
+  }
+  return result;
+}

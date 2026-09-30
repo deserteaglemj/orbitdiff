@@ -12,15 +12,16 @@ OrbitDiff Web sits beside the local product. The Python package, the OrbitDiff A
 4. A count change is a count change: "net growth of 3", never three named accounts.
 5. Hosted automatic identity collection is unsupported and the interface says so. The hosted app never runs Instaloader, never loads a session file, and never asks for a password, code, cookie, or session.
 6. The public following-list state machine (`src/orbitdiff/diff.py`) is ported and pinned by `src/orbitdiff/fixtures`. No hosted source feeds it and no route exposes it.
-7. Background jobs process stored imports and daily reviews. They never contact Instagram. A failed job is shown as a failure next to the last success and never replaces it.
+7. Background jobs process stored imports and daily reviews. They never contact Instagram. A failed job is shown as a failure next to the last success and never replaces it. Work of another kind does not hide it either: a failed processing of an import stands until an import is processed again, whatever reviews succeed meanwhile, and its success line names the last processed result.
 8. Nothing personal is copied from a local workspace. Tests use `atlas_studio`, `nova_labs`, `pixel_forge` and other synthetic handles.
 
 ## 2. Architecture
 
 - Next.js 16 App Router in `web/`, TypeScript strict, React server components for reads, JSON route handlers under `/api` for every mutation.
 - Postgres through Drizzle ORM and the `pg` driver in every environment.
-- Better Auth: email and password, email verification required, password reset, database sessions in secure httpOnly cookies, database-backed rate limiting per client and per target address. No OAuth, no admin plugin, no email change.
+- Better Auth: email and password, email verification required, password reset, database sessions in secure httpOnly cookies, database-backed rate limiting per client and per target address. No OAuth, no admin plugin, no email change. An account keeps at most `LIMITS.sessionsPerUser` sessions (a new sign-in ends the oldest), a session stores at most `LIMITS.sessionUserAgentChars` characters of the User-Agent header, and retention removes expired sessions.
 - Verification is bound to the password: opening the mailed link only leaves a signed, one hour proof in that browser. The address becomes verified at the first sign-in from that browser with the pending account's current password. The link alone verifies nothing and signs nobody in. Registering an unverified address again replaces the pending account, so a password set by someone without the mailbox never survives.
+- Accounts that wait for verification take no place under `CAPACITY_MAX_USERS`. At most that many of them are kept: a sign-up that will be accepted first removes the oldest to make room. A flood of made-up addresses therefore cannot close registration. Accounts that were already waiting when the cap was reached can still be verified.
 - Durable jobs: a `job` table drained by `POST /api/jobs/tick`. The tick is called hourly by the GitHub Actions workflow `.github/workflows/orbitdiff-web-jobs.yml` and opportunistically right after an import. A Vercel cron is not the scheduler.
 - Exports are parsed in the browser. Only recognized follower and following usernames, shard numbers, the capture time, and the completeness declarations are sent. The server stores no uploaded files.
 - No LLM, scraper, or paid dependency.
@@ -87,7 +88,7 @@ Local tool notes: set `COREPACK_HOME` to a directory outside the home directory 
 | `activity_entry` | The user-visible feed: imports received and processed, reviews, failures, profile changes. |
 | `usage_daily` | Per-day counters for quotas. |
 | `system_state` | Last tick, measured database size, capacity flags. |
-| `audit_event` | Security-relevant events without personal data. |
+| `audit_event` | Security-relevant events without personal data. Removed after `LIMITS.retainAuditDays` (90) days. |
 | `mail_capture` | Mail captured instead of delivered (tests and staging only). |
 
 ## 4. Domain rules
@@ -134,6 +135,7 @@ Optional. When present it is a string of at most 40 characters that carries a ti
 - View of the current snapshot: for each username, `following` and `followedBy` are `true` when present, `false` only when that direction's coverage is complete, otherwise `null`. Relationship is `mutual`, `not_following_back`, `follows_you`, or `unknown`. Metrics follow `personal._view`: counts are `null` unless coverage supports them.
 - Status: `degraded` when any direction is not complete, else `stale` when the capture time is older than 36 hours, else `ok`.
 - Events: take dated snapshots in ascending capture order and compare consecutive pairs, newest pair first. Additions are reported only when the earlier snapshot's direction is complete, removals only when the later one's is. Event types are `follower_observed_added`, `follower_observed_removed`, `following_observed_added`, `following_observed_removed`. The digest is `sha256(canonical([previous.snapshotDigest, current.snapshotDigest, type, username]))`. Undated snapshots never participate. Events are a pure function of the whole dated history.
+- Comparability: `comparability(history)` counts, with the same rules, the pairs in which each side of each direction could be checked. No event means "no difference" only where a check ran. The derive job stores it in the `import_processed` entry as `comparison`; with no check the feed and the Changes section say "Nothing could be compared", and with some checks they name what was compared.
 
 ### 4.6 Public following-list state machine (fixture-tested only)
 
@@ -145,14 +147,14 @@ Count history is the series of dated snapshots whose direction coverage is compl
 
 ### 4.8 Review schedule
 
-Each user has an IANA timezone and a local review hour (0 to 23). `nextReviewAt(now, timezone, hour)` is the first instant strictly after `now` whose local time is `hour:00`. A local time that does not exist (spring forward) resolves to the first valid instant after the gap; a local time that occurs twice (fall back) resolves to the first occurrence. The daily job key is `daily:<profileId>:<localDate>`, where the local date is that of the review time that was due, in the user's timezone, not that of the run that picks it up. A profile therefore gets at most one scheduled review per local date on 23, 24, and 25 hour days and across timezone changes, and a run that starts after local midnight does not use up the next day's review.
+Each user has an IANA timezone and a local review hour (0 to 23). The timezone is stored under the one name `Intl` resolves it to (`canonicalTimezone`): "europe/berlin" is stored as "Europe/Berlin", and every cache of formatters is keyed by that name only, so no spelling of a zone adds a new entry. `nextReviewAt(now, timezone, hour)` is the first instant strictly after `now` whose local time is `hour:00`. A local time that does not exist (spring forward) resolves to the first valid instant after the gap; a local time that occurs twice (fall back) resolves to the first occurrence. The daily job key is `daily:<profileId>:<localDate>`, where the local date is that of the review time that was due, in the user's timezone, not that of the run that picks it up. A profile therefore gets at most one scheduled review per local date on 23, 24, and 25 hour days and across timezone changes, and a run that starts after local midnight does not use up the next day's review.
 
 ## 5. Jobs
 
 | Kind | Trigger | Work |
 | --- | --- | --- |
 | `derive_profile` | Every import that changes history | Re-derive export events and the profile summary from the whole dated history, replace them atomically, set `derived_revision`, write an `import_processed` activity entry. |
-| `daily_review` | The tick, when `next_review_at` is due | Record freshness (no import, stale, or current), coverage, and counts as a `review` activity entry; advance `next_review_at`. |
+| `daily_review` | The tick, when `next_review_at` is due | Record freshness (no import, stale, or current), coverage, and counts as a `review` activity entry. `next_review_at` advances when that date's review is queued; while the review of an earlier date still waits, the profile stays due, so a date's review is delayed, never merged into another. |
 | `manual_review` | `POST /api/profiles/:id/review` | Same work as a daily review, under the cooldown and the daily limit. |
 
 Queue rules:
@@ -165,11 +167,13 @@ Queue rules:
 - Recovery: the tick requeues running jobs whose lease expired, or fails them at the attempt limit.
 - Cancel: pausing a profile cancels its queued review jobs in the same transaction. Removing a profile or deleting an account removes its jobs through the cascade; a running job then fails its completion guard.
 
-Tick (`POST /api/jobs/tick`, header `Authorization: Bearer <JOBS_TICK_SECRET>`, constant-time compare): recover expired leases, enqueue due daily reviews for active profiles of verified active users, drain up to `LIMITS.tickMaxJobs` jobs with `LIMITS.tickConcurrency` workers inside `LIMITS.tickBudgetMs`, run bounded retention cleanup, measure database size, store `system_state.last_tick`, and return a summary. Safe to call concurrently and repeatedly.
+Tick (`POST /api/jobs/tick`, header `Authorization: Bearer <JOBS_TICK_SECRET>`, constant-time compare): recover expired leases, enqueue due daily reviews for active profiles of verified active users, drain up to `LIMITS.tickMaxJobs` (200) jobs with `LIMITS.tickConcurrency` workers inside `LIMITS.tickBudgetMs`, run bounded retention cleanup, measure database size, store `system_state.last_tick`, and return a summary. Safe to call concurrently and repeatedly.
 
 ## 6. Quotas
 
-All values live in `web/src/domain/limits.ts`. When a limit is reached the action returns `quota_exhausted`, `cooldown`, or `capacity_paused`, the interface shows a visible paused state with the reason, and nothing falls through to a paid tier. Global capacity (`CAPACITY_MAX_USERS`, `CAPACITY_MAX_JOBS_PER_DAY`, `CAPACITY_MAX_DB_BYTES`) pauses registration, scheduled work, and imports respectively.
+All values live in `web/src/domain/limits.ts`. When a limit is reached the action returns `quota_exhausted`, `cooldown`, or `capacity_paused`, the interface shows a visible paused state with the reason, and nothing falls through to a paid tier. Global capacity (`CAPACITY_MAX_USERS`, `CAPACITY_MAX_JOBS_PER_DAY`, `CAPACITY_MAX_DB_BYTES`) pauses registration, scheduled work, and imports respectively. `CAPACITY_MAX_USERS` counts verified accounts only. While scheduled work is paused, the dashboard, each profile page, and the settings page show a paused notice with the reason and the time it resumes, and a review time that has passed reads as overdue, never as the next review.
+
+Writes that append rows are bounded per account, because the global database cap pauses imports for everyone: product news grants (`LIMITS.marketingGrantsPerUserPerDay` per UTC day; a withdrawal is never limited, and a choice that changes nothing writes nothing), resumes of a profile (`LIMITS.resumesPerProfilePerDay` per UTC day; pausing is never limited), and sign-in sessions (see section 2). Retention removes expired sessions and security events older than `LIMITS.retainAuditDays`.
 
 ## 7. Authorization
 

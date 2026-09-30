@@ -11,7 +11,7 @@ Checked 2026-09-30. Budget for new spending: $0. Every tier below stops or rejec
 | Hourly job tick | GitHub Actions scheduled workflow on the public repository | Free for public repositories | Hobby cron can run only once per day, so it is not the scheduler. |
 | Mail | None in production; captured in staging | none | There is no OrbitDiff sending domain. |
 
-Not used: the Supabase and Resend resources on the team (they belong to another project), any Marketplace database, any paid plan, any trial.
+Not used: any other resource on the owner's team, any Marketplace database, any paid plan, any trial.
 
 Local development and every automated test run against a real throwaway Postgres 18 started by the test runner, so the application is verified against Postgres without any hosted database.
 
@@ -50,7 +50,7 @@ These keep the app well inside the provider limits. They live in `web/src/domain
 
 | Limit | Value |
 | --- | --- |
-| Registered users | `CAPACITY_MAX_USERS`, default 250. Registration pauses visibly at the limit. |
+| Verified users | `CAPACITY_MAX_USERS`, default 250. Registration pauses visibly at the limit. Accounts that wait for email verification take no place; at most as many of them are kept, and the oldest is removed first to make room, so made-up sign-ups cannot close registration. |
 | Jobs per UTC day | `CAPACITY_MAX_JOBS_PER_DAY`, default 2,000. Scheduled work pauses visibly at the limit. |
 | Database size | `CAPACITY_MAX_DB_BYTES`, default 400 MB. Set it below the chosen database plan limit. Imports pause visibly at the limit. |
 | Profiles per user | 3 |
@@ -60,9 +60,12 @@ These keep the app well inside the provider limits. They live in `web/src/domain
 | Imports per user per day | 10 |
 | Import request body | 3 MB |
 | Manual reviews per profile per day | 3, at least 30 minutes apart |
+| Resumes per profile per day | 5. Pausing is never limited. |
+| Product news grants per user per day | 5. Withdrawing is never limited, and a choice that changes nothing writes nothing. |
+| Sign-in sessions per account | 20; a new sign-in ends the oldest. At most 256 characters of the User-Agent header are stored. |
 | Job attempts | 3, with 5 and 30 minute backoff |
-| Jobs per tick | 25, three at a time, inside 45 seconds |
-| Retention | Finished jobs 90 days, activity 400 days, unverified accounts 7 days, captured mail 7 days |
+| Jobs per tick | Up to 200, three at a time, inside 45 seconds. 24 hourly runs can start 4,800 jobs, more than the 2,000 a day of `CAPACITY_MAX_JOBS_PER_DAY`, so the time budget and the daily capacity are what bound them. |
+| Retention | Finished jobs 90 days, activity 400 days, unverified accounts 7 days, captured mail 7 days, security events 90 days, expired sessions at the next run |
 
 ## Expected usage
 
@@ -77,6 +80,8 @@ Assumptions: three profiles per user, one scheduled review per profile per day, 
 | Active CPU | under 0.1 hours | about 0.5 hours | about 1.2 hours |
 | Stored data, typical 2,000 usernames per snapshot | about 10 MB | about 100 MB | about 250 MB |
 | Cost | $0 | $0 | $0 |
+
+At the registration cap about 750 reviews fall due a day. Each hourly run drains up to 200 jobs, so even when every review falls due in the same hour, the backlog is gone within four runs. A review that is still waiting when its profile's next review falls due keeps the profile due instead of absorbing that day's review, so no day is dropped.
 
 Database compute and storage depend on the Postgres the owner chooses, so they are not estimated here. For reference only, the free Neon tier that was evaluated and not installed allows 0.5 GB and 100 compute-unit hours per month and suspends instead of billing; on a tier like that, database compute would be the first limit reached, at roughly 100 to 250 users. The registration cap of 250 is a deliberate ceiling. Raising it is an operator decision, not a default.
 

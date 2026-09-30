@@ -141,6 +141,11 @@ const buildSections = (operatorName: string | null): LegalSection[] => [
             {formatCount(LIMITS.manualReviewsPerProfilePerDay)} manual reviews per profile per day, at least{" "}
             {minutes(LIMITS.reviewCooldownMs)} minutes apart.
           </li>
+          <li>{formatCount(LIMITS.resumesPerProfilePerDay)} resumes per profile per day. Pausing is never limited.</li>
+          <li>
+            Product news can be turned on {formatCount(LIMITS.marketingGrantsPerUserPerDay)} times per day. Turning it
+            off is never limited.
+          </li>
         </ul>
         <p>Do not try to get around a quota, for example by creating more accounts.</p>
       </>

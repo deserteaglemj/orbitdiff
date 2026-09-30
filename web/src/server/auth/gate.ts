@@ -4,7 +4,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { z } from "zod";
 
 import { CONSENT_VERSIONS } from "@/domain/limits";
-import { isValidTimezone } from "@/domain/schedule";
+import { canonicalTimezone } from "@/domain/schedule";
 import { getEnv } from "@/server/env";
 import { constantTimeEqual } from "@/server/http/compare";
 import { mailDelivery } from "@/server/mail/transport";
@@ -14,7 +14,7 @@ import { ADDRESS_RULES, consumeAddressLimit } from "./address-limit";
 import { recordAuthEvent } from "./audit";
 import { isRecord, type Body, type GateContext } from "./gate-context";
 import { isSitePath, SITE_PATH_MAX } from "./paths";
-import { discardPendingAccount } from "./pending";
+import { discardPendingAccount, makeRoomForPendingAccount } from "./pending";
 import { getRegistrationState } from "./registration";
 import { SIGNUP_CODE_HEADER } from "./signup-code";
 import { refuseSuspendedLogin } from "./suspension";
@@ -114,13 +114,20 @@ function assertName(name: unknown): void {
   }
 }
 
-function assertTimeZone(timezone: unknown): void {
-  if (!isValidTimezone(timezone)) {
+/**
+ * The canonical name of the timezone that was sent, which is what gets stored:
+ * "europe/berlin" is stored as "Europe/Berlin". Anything that is not a zone name
+ * is refused.
+ */
+function assertTimeZone(timezone: unknown): string {
+  const zone = canonicalTimezone(timezone);
+  if (zone === null) {
     throw new APIError("UNPROCESSABLE_ENTITY", {
       code: "INVALID_TIMEZONE",
       message: "Choose a valid IANA timezone, for example Europe/Berlin.",
     });
   }
+  return zone;
 }
 
 const ACCEPT_TO_REGISTER = "Accept the Terms and the Privacy notice to create an account.";
@@ -209,9 +216,9 @@ function assertPrivacyAccepted(body: Body): void {
   }
 }
 
-/** What the gate hands back to Better Auth: the one body field it rewrites. */
+/** What the gate hands back to Better Auth: the body fields it rewrites. */
 interface SignUpRewrite {
-  context: { body: { marketingOptIn: boolean } };
+  context: { body: { marketingOptIn: boolean; timezone: string } };
 }
 
 /**
@@ -222,7 +229,7 @@ interface SignUpRewrite {
  * Marketing consent is granted by the boolean `true` and by nothing else. Any
  * other value ("true", "on", 1, a missing field) is replaced with `false`
  * before Better Auth reads the body, so no coercion further down can turn it
- * into a grant.
+ * into a grant. The timezone is replaced with its canonical name.
  */
 async function gateSignUp(ctx: GateContext): Promise<SignUpRewrite> {
   const rawBody: unknown = ctx.body;
@@ -248,13 +255,17 @@ async function gateSignUp(ctx: GateContext): Promise<SignUpRewrite> {
   assertOnlyKeys(body, SIGN_UP_KEYS);
   assertTermsAccepted(body);
   assertPrivacyAccepted(body);
-  assertTimeZone(body.timezone);
+  const timezone = assertTimeZone(body.timezone);
   assertName(body.name);
   if (typeof body.email !== "string" || body.email.length > EMAIL_MAX) {
     throw new APIError("UNPROCESSABLE_ENTITY", { code: "INVALID_EMAIL", message: "Enter a valid email address." });
   }
-  if (wouldBeAccepted(ctx, body)) await discardPendingAccount(body.email);
-  return { context: { body: { marketingOptIn: body.marketingOptIn === true } } };
+  if (wouldBeAccepted(ctx, body)) {
+    await discardPendingAccount(body.email);
+    // Unverified accounts take no place under the user capacity; this bounds them instead.
+    await makeRoomForPendingAccount(env.capacity.maxUsers);
+  }
+  return { context: { body: { marketingOptIn: body.marketingOptIn === true, timezone } } };
 }
 
 /**
@@ -295,13 +306,15 @@ function wouldBeAccepted(ctx: GateContext, body: Body): body is Body & { email: 
 /**
  * Only the display name and the timezone can change through Better Auth.
  * Consent changes must go through the consent log, and review settings,
- * status, and verification are never client-settable.
+ * status, and verification are never client-settable. A timezone is stored
+ * under its canonical name.
  */
-function gateUpdateUser(rawBody: unknown): void {
+function gateUpdateUser(rawBody: unknown): { context: { body: { timezone: string } } } | undefined {
   const body = asBody(rawBody);
   assertOnlyKeys(body, UPDATE_USER_KEYS);
   if (body.name !== undefined) assertName(body.name);
-  if (body.timezone !== undefined) assertTimeZone(body.timezone);
+  if (body.timezone === undefined) return undefined;
+  return { context: { body: { timezone: assertTimeZone(body.timezone) } } };
 }
 
 /**
@@ -370,8 +383,7 @@ export const authGate = createAuthMiddleware(async (ctx) => {
     case "/verify-email":
       return openVerificationLink(ctx);
     case "/update-user":
-      gateUpdateUser(ctx.body);
-      return;
+      return gateUpdateUser(ctx.body);
     case "/delete-user":
       gateDeleteUser(ctx.body);
       return;

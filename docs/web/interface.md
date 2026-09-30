@@ -334,7 +334,7 @@ Both pages call the guards themselves and the services with the user id the guar
 
 | Part | Use |
 | --- | --- |
-| `ProfileForm`, `ReviewSchedule` (`profile-form.tsx`) | Display name, timezone, review hour through `PATCH /api/me`. The timezone is a native select narrowed by a search field above it. The schedule lists the stored next review of each profile. |
+| `ProfileForm`, `ReviewSchedule` (`profile-form.tsx`) | Display name, timezone, review hour through `PATCH /api/me`. The timezone is a native select narrowed by a search field above it. The schedule lists the stored next review of each profile, or the `caveat` the server worked out when that time does not hold: overdue, or paused at the daily job capacity. Above it, the paused notice with the reason while scheduled work is paused. |
 | `MarketingForm` | The product news choice through `POST /api/me/consent`, with the recorded state, time, and version. |
 | `ConsentRecord` | The recorded Terms and Privacy notice consent. Read only: no control and no form. |
 | `SecuritySection`, `PasswordForm`, `SessionsPanel`, `SessionsTable` | Change password, sign out, sign out of all other devices, and the list of logins with a sign-out for each. All through the auth client. |
@@ -416,10 +416,10 @@ Tabs, search text, filters, and the page number are query parameters, read by pu
 | Module | What it decides |
 | --- | --- |
 | `dashboard/local-time.ts` | `formatLocalTime(iso, zone)` gives `20 Sep 2026, 12:00 (America/Chicago)`: every time on these screens names its timezone. `localInputToIso(value, zone)` turns the value of a date and time control into an ISO string with that timezone's offset. |
-| `dashboard/card-model.ts` | `profileCard(profile, extras)`: the evidence badge, the counts (`null` stays "Unknown"), the source line, coverage wording ("declared by you"), the times, and the processing, failure, and paused states. `profileFailure` reports a failure only while no later job has succeeded, and always as two statements: the failure and the last success. |
+| `dashboard/card-model.ts` | `profileCard(profile, extras)`: the evidence badge, the counts (`null` stays "Unknown"), the source line, coverage wording ("declared by you"), the times, and the processing, failure, and paused states. The badge, the age, and the source line describe `shownExport(profile)`: while a newer import waits for processing, that is the last processed export (`profile.processed`), and the processing state names the newer one separately. `profileFailure` always gives two statements, the failure and the last success. A failed processing (`profile.processingFailure`) stands until an import is processed again, whatever reviews succeed meanwhile, and its success line is the last processed result; any other failure stands while no later job has succeeded. `nextReviewCaveat` and `schedulePause` say when a review is overdue and when scheduled work is paused at the daily job capacity, with the reason. |
 | `dashboard/activity-model.ts` | The feed rows (the wording itself comes from the service), the filter options, `readActivityQuery`, `activityHref`. |
 | `dashboard/api.ts` | `requestJson` for the JSON routes. `describeRefusal` keeps the route's message and adds the remaining cooldown or the local time a daily limit starts again. |
-| `profile/rows.ts` | `triState` (Yes, No, Unknown), `changeRow` and `observedInterval` ("Observed in your export between A and B (zone)"), `changesState` (no import, undated, baseline, pending, none observed, no match, list), `snapshotRow`, `countRows`, the tabs, `removalDescription`. |
+| `profile/rows.ts` | `triState` (Yes, No, Unknown), `changeRow` and `observedInterval` ("Observed in your export between A and B (zone)"), `changesState` (no import, undated, baseline, pending or failed processing, nothing could be compared, none observed, no match, list; `snapshotComparison` tells "none observed" from "nothing could be compared"), `snapshotRow`, `countRows`, the tabs, `removalDescription`. |
 | `import/model.ts` | `classifySelection` (what is read and what is ignored, before any content is loaded), `parseSelection` (the domain rule `parseExportFiles` with the hosted limits), `summarizeImport`, `readCaptureInput`, `coveragePreview`, `buildImportRequest`, `describeReceipt`, `processingOutcome`, `importQuota`. |
 
 ### Rules

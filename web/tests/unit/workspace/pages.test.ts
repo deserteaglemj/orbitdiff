@@ -13,11 +13,12 @@ import { ImportFlow } from "@/components/import/import-flow";
 import { ProfileScreen } from "@/components/profile/profile-screen";
 import { formatCaptureTime } from "@/domain/capture-time";
 import { getDb } from "@/server/db/client";
-import { user } from "@/server/db/schema";
+import { profile, usageDaily, user } from "@/server/db/schema";
 import { importExport } from "@/server/services/imports";
 import { createProfile } from "@/server/services/profiles";
+import { GLOBAL_SCOPE, utcDay } from "@/server/services/usage";
 
-import { createVerifiedUser, resetDatabase, restoreTestEnv, type VerifiedUser } from "../../helpers";
+import { createVerifiedUser, resetDatabase, restoreTestEnv, setTestEnv, type VerifiedUser } from "../../helpers";
 import { ATLAS, exportPayload, markDerived, NOVA, RANDOM_ID } from "../../integration/services/support";
 import { startDatabase } from "./support/database";
 import { badgeTexts, noticeTexts, renderScreen } from "./support/render";
@@ -423,5 +424,57 @@ describe("a stale export, from the import to the page", () => {
     const html = profileMarkup(await profileScreen(atlas.profileId));
     expect(badgeTexts(html)).toEqual(["Incomplete coverage"]);
     expect(noticeTexts(html).filter((text) => text.includes("stale"))).toEqual([]);
+  });
+});
+
+describe("scheduled reviews that are paused or overdue", () => {
+  const HOUR = 3_600_000;
+
+  /** Use up the day's job capacity, as the batch run would once CAPACITY_MAX_JOBS_PER_DAY jobs started. */
+  async function useUpJobCapacity(): Promise<void> {
+    setTestEnv({ CAPACITY_MAX_JOBS_PER_DAY: "1" });
+    await getDb().insert(usageDaily).values({ day: utcDay(new Date()), scopeKey: GLOBAL_SCOPE, jobs: 1 });
+  }
+
+  async function dueAnHourAgo(profileId: string): Promise<void> {
+    await getDb().update(profile).set({ nextReviewAt: new Date(Date.now() - HOUR) }).where(eq(profile.id, profileId));
+  }
+
+  const pausedNotice = (html: string) =>
+    noticeTexts(html).find((text) => text.includes("Scheduled reviews are paused")) ?? null;
+
+  it("says on the dashboard that scheduled reviews are paused, why, and when they resume", async () => {
+    const { atlas } = await twoAccounts();
+    await dueAnHourAgo(atlas.profileId);
+    await useUpJobCapacity();
+    visitAs(atlas.cookie);
+
+    const html = renderScreen(await dashboardScreen());
+
+    expect(pausedNotice(html)).toContain("The service reached its daily job capacity.");
+    expect(html).toContain("Paused until");
+    expect(html).not.toContain("Overdue since");
+  });
+
+  it("says it on the profile page as well", async () => {
+    const { atlas } = await twoAccounts();
+    await useUpJobCapacity();
+    visitAs(atlas.cookie);
+
+    const html = profileMarkup(await profileScreen(atlas.profileId));
+
+    expect(pausedNotice(html)).toContain("The service reached its daily job capacity.");
+    expect(html).toContain("Paused until");
+  });
+
+  it("calls a review time that has passed overdue, on the dashboard and on the profile page", async () => {
+    const { atlas } = await twoAccounts();
+    await dueAnHourAgo(atlas.profileId);
+    visitAs(atlas.cookie);
+
+    expect(renderScreen(await dashboardScreen())).toContain("Overdue since");
+    const html = profileMarkup(await profileScreen(atlas.profileId));
+    expect(html).toContain("Overdue since");
+    expect(pausedNotice(html)).toBeNull();
   });
 });

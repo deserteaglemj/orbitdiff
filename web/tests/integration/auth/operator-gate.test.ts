@@ -6,7 +6,7 @@ import { closeDb, getDb } from "@/server/db/client";
 import { user } from "@/server/db/schema";
 import { getEnv } from "@/server/env";
 
-import { signUp } from "../../helpers/auth";
+import { createVerifiedUser, signUp } from "../../helpers/auth";
 import { resetDatabase } from "../../helpers/db";
 import { restoreTestEnv, setTestEnv } from "../../helpers/env";
 import { callRoute } from "../../helpers/http";
@@ -61,7 +61,9 @@ describe("operator gate: registration stays closed until an operator is named", 
 
   it("is checked before the capacity gate", async () => {
     setTestEnv({ CAPACITY_MAX_USERS: "1" });
-    expect((await signUp({ email: "nova@orbitdiff.test" })).status).toBe(200);
+    // Only a verified account takes a place, so this one fills the capacity.
+    await createVerifiedUser({ email: "nova@orbitdiff.test" });
+    expect((await getRegistrationState()).code).toBe("paused");
     setTestEnv({ OPERATOR_NAME: undefined });
     const response = await signUp({ email: EMAIL });
     expect(response.status).toBe(503);

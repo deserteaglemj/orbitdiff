@@ -5,7 +5,17 @@ import { and, eq, inArray, lt, notExists, sql } from "drizzle-orm";
 import { LIMITS } from "@/domain/limits";
 import { purgeUserLeftovers } from "@/server/auth/deletion";
 import { getDb } from "@/server/db/client";
-import { activityEntry, job, mailCapture, profile, rateLimit, user, verification } from "@/server/db/schema";
+import {
+  activityEntry,
+  auditEvent,
+  job,
+  mailCapture,
+  profile,
+  rateLimit,
+  session,
+  user,
+  verification,
+} from "@/server/db/schema";
 import { logError } from "@/server/http/log";
 
 /** Rows removed per kind in one run. A backlog is worked off over several runs. */
@@ -23,6 +33,10 @@ export interface RetentionSummary {
   mail: number;
   verifications: number;
   rateLimits: number;
+  /** Sign-in sessions past their expiry. */
+  sessions: number;
+  /** Security events past LIMITS.retainAuditDays. */
+  auditEvents: number;
   total: number;
 }
 
@@ -44,7 +58,8 @@ async function step(work: () => Promise<number>): Promise<number> {
 /**
  * Remove what has outlived its purpose: finished jobs and activity past their windows,
  * accounts that never got past sign-up (unverified and without a profile), captured mail,
- * expired verification rows, and idle rate limit counters. Every delete is bounded. Export
+ * expired verification rows, idle rate limit counters, expired sign-in sessions, and
+ * security events past their window. Every delete is bounded. Export
  * snapshots, change events, profiles, verified accounts, and any account that holds a
  * profile are never touched here: a user's stored evidence only goes when the user
  * removes it.
@@ -121,6 +136,21 @@ export async function runRetention(options: RetentionOptions): Promise<Retention
     return (await db.delete(rateLimit).where(inArray(rateLimit.id, doomed)).returning({ id: rateLimit.id })).length;
   });
 
+  // Better Auth removes an expired session only when its token is presented again.
+  const sessions = await step(async () => {
+    const doomed = db.select({ id: session.id }).from(session).where(lt(session.expiresAt, options.now)).limit(batch);
+    return (await db.delete(session).where(inArray(session.id, doomed)).returning({ id: session.id })).length;
+  });
+
+  const auditEvents = await step(async () => {
+    const doomed = db
+      .select({ id: auditEvent.id })
+      .from(auditEvent)
+      .where(lt(auditEvent.at, before(LIMITS.retainAuditDays)))
+      .limit(batch);
+    return (await db.delete(auditEvent).where(inArray(auditEvent.id, doomed)).returning({ id: auditEvent.id })).length;
+  });
+
   return {
     jobs,
     activity,
@@ -128,6 +158,8 @@ export async function runRetention(options: RetentionOptions): Promise<Retention
     mail,
     verifications,
     rateLimits,
-    total: jobs + activity + unverifiedAccounts + mail + verifications + rateLimits,
+    sessions,
+    auditEvents,
+    total: jobs + activity + unverifiedAccounts + mail + verifications + rateLimits + sessions + auditEvents,
   };
 }

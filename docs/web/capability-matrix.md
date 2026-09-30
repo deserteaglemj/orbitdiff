@@ -65,5 +65,6 @@ Retrieved 2026-09-30.
 - Never write that OrbitDiff Web tracks followers automatically, in real time, or from Instagram.
 - The interface states that automatic identity tracking is unavailable.
 - Export differences read "observed in your export between DATE and DATE".
+- "No differences observed" is said only where a comparison could run. When no list was complete where a comparison needs it, the wording is "Nothing could be compared" and the difference is unknown. When only part could be compared, the wording names what was compared and says the rest is unknown.
 - Count changes read "net growth of N" or "net decline of N".
-- A failed job is shown as its own entry next to the last successful result. It never replaces it.
+- A failed job is shown as its own entry next to the last successful result. It never replaces it, and a later job of another kind does not hide it: a failed processing stands until an import is processed again.

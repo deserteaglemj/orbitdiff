@@ -81,7 +81,8 @@ describe("audit: refused registrations", () => {
 
   it("records the refusal code when capacity is reached", async () => {
     setTestEnv({ CAPACITY_MAX_USERS: "1" });
-    expect((await signUp({ email: NOVA })).status).toBe(200);
+    // Only a verified account takes a place.
+    await createVerifiedUser({ email: NOVA });
     expect((await signUp({ email: ATLAS })).status).toBe(503);
     expect(await auditRows()).toEqual([
       { action: "registration_refused", actorUserId: null, detail: { code: "REGISTRATION_PAUSED" } },

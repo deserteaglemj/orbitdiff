@@ -48,6 +48,26 @@ describe("privacy notice: how long data is kept", () => {
     expect(retention).not.toContain("On test deployments");
     expect(retention).toContain("Account messages that are stored instead of sent are removed after 7 days.");
   });
+
+  it("says how long security events are kept", () => {
+    expect(retention).toContain(
+      "Security events, such as a completed password reset or a refused registration, are removed after 90 days.",
+    );
+  });
+
+  it("says how many sign-in sessions an account keeps and that expired ones are removed", () => {
+    expect(retention).toContain("An account keeps at most 20 sign-in sessions: a new sign-in ends the oldest.");
+    expect(retention).toContain("An expired session is removed.");
+  });
+});
+
+describe("terms: quotas", () => {
+  const quotas = sectionText(renderHtml(TermsPage), "quotas");
+
+  it("lists the daily limits on resuming a profile and on turning product news on", () => {
+    expect(quotas).toContain("5 resumes per profile per day. Pausing is never limited.");
+    expect(quotas).toContain("Product news can be turned on 5 times per day. Turning it off is never limited.");
+  });
 });
 
 describe("privacy notice: who can see your data", () => {

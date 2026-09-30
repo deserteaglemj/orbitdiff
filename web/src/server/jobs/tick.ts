@@ -134,6 +134,11 @@ function localDate(instant: Date, timezone: string | null): string {
  * of the run that picks it up), so a profile gets one scheduled review per local date
  * however late a run is. Queueing the job and moving the next review time happen in one
  * transaction, under the profile's row lock: a crash, or a second tick, cannot queue twice.
+ *
+ * While the review of an earlier date still waits in the queue (one active job per profile
+ * and kind), the review that is now due is not folded into it: the next review time stays
+ * where it is, so the profile stays due and a later run queues that date's review once the
+ * earlier one has run. No scheduled date is dropped, only delayed.
  */
 async function enqueueDueReviews(now: Date, limit: number): Promise<number> {
   if (limit < 1) return 0;
@@ -189,13 +194,16 @@ async function enqueueDueReviews(now: Date, limit: number): Promise<number> {
         // Keyed by the date the review was scheduled for. A run that starts after local
         // midnight still files a late-evening review under its own date, so the review of
         // the date that has just begun is not deduplicated away.
+        const key = dedupeKey.daily(candidate.profileId, localDate(due.nextReviewAt, owner.timezone));
         const queued = await enqueueJob(tx, {
           userId: candidate.userId,
           profileId: candidate.profileId,
           kind: "daily_review",
-          dedupeKey: dedupeKey.daily(candidate.profileId, localDate(due.nextReviewAt, owner.timezone)),
+          dedupeKey: key,
           runAfter: now,
         });
+        // Another date's review still waits: keep this one due rather than merge it away.
+        if (queued.job.dedupeKey !== key) return false;
         await tx
           .update(profile)
           .set({ nextReviewAt: reviewTimeFor(now, owner.timezone, owner.reviewHour) })

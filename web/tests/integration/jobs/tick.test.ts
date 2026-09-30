@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
+import { CAPACITY_DEFAULTS, CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
 import { nextReviewAt } from "@/domain/schedule";
 import { closeDb, getDb } from "@/server/db/client";
 import { consentRecord, job, profile, systemState, usageDaily, user } from "@/server/db/schema";
@@ -246,6 +246,48 @@ describe("runTick: capacity", () => {
 
     expect(summary).toMatchObject({ enqueued: 2, claimed: 2, succeeded: 2, pausedForCapacity: false });
     expect(await stateOf(JOB_CAPACITY_STATE_KEY)).toMatchObject({ used: 3, paused: true });
+  });
+});
+
+describe("runTick: throughput", () => {
+  it("runs every review that falls due in a busy hour within that hour's run", async () => {
+    const owner = await createVerifiedUser({ email: "atlas@orbitdiff.test", onboarded: true });
+    const count = 80;
+    for (let index = 0; index < count; index += 1) {
+      await addProfile(owner.userId, `atlas_studio_${index}`, { nextReviewAt: DUE });
+    }
+
+    const summary = await runTick({ now: NOW });
+
+    expect(summary).toMatchObject({ enqueued: count, claimed: count, succeeded: count, failed: 0, remaining: 0 });
+  });
+
+  it("can run a whole day's job capacity in one day of hourly runs", () => {
+    expect(24 * LIMITS.tickMaxJobs).toBeGreaterThanOrEqual(CAPACITY_DEFAULTS.maxJobsPerDay);
+  });
+
+  it("does not fold the review of a day into one that is still waiting from an earlier day", async () => {
+    const owner = await dueOwner();
+    // The review of 30 Sep is queued, and no run has drained it yet.
+    expect((await runTick({ now: NOW, limits: { tickMaxJobs: 0 } })).enqueued).toBe(1);
+    const dueNext = new Date("2026-10-01T09:00:00.000Z");
+    expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe(dueNext.toISOString());
+
+    // The review of 1 Oct falls due while that one still waits: it stays due instead of being dropped.
+    const late = new Date("2026-10-01T09:17:00.000Z");
+    expect((await runTick({ now: late, limits: { tickMaxJobs: 0 } })).enqueued).toBe(0);
+    expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe(dueNext.toISOString());
+
+    // The next runs finish the review of 30 Sep, then queue and run the one of 1 Oct.
+    await runTick({ now: new Date("2026-10-01T10:17:00.000Z") });
+    await runTick({ now: new Date("2026-10-01T11:17:00.000Z") });
+
+    expect((await jobsOf(owner.profileId, "daily_review")).map((row) => [row.dedupeKey, row.status])).toEqual([
+      [`daily:${owner.profileId}:2026-09-30`, "succeeded"],
+      [`daily:${owner.profileId}:2026-10-01`, "succeeded"],
+    ]);
+    expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe("2026-10-02T09:00:00.000Z");
+    expect(await activityOf(owner.profileId, "review")).toHaveLength(2);
   });
 });
 

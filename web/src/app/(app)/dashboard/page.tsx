@@ -6,6 +6,7 @@ import { DashboardScreen } from "@/components/dashboard/dashboard-screen";
 import type { PageQuery } from "@/components/dashboard/query";
 import { workspaceUser } from "@/components/dashboard/workspace-access";
 import { LIMITS } from "@/domain/limits";
+import { readScheduleState } from "@/server/jobs/capacity";
 import { listActivity } from "@/server/services/activity";
 import { getCountHistory } from "@/server/services/counts";
 import { listProfiles } from "@/server/services/profiles";
@@ -27,7 +28,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const query = await searchParams;
   const now = new Date();
 
-  const profiles = await listProfiles(user.id, { pageSize: LIMITS.pageSizeMax }, now);
+  const [profiles, schedule] = await Promise.all([
+    listProfiles(user.id, { pageSize: LIMITS.pageSizeMax }, now),
+    readScheduleState(now),
+  ]);
   const filters = readActivityQuery(
     query,
     profiles.data.map((profile) => profile.id),
@@ -56,10 +60,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       timeZone={user.timezone}
       cards={profiles.data.map((profile, index) =>
         // The clock the service judged the evidence with also decides how old each export is.
-        profileCard(profile, { ...extras[index], timeZone: user.timezone, now }),
+        profileCard(profile, { ...extras[index], timeZone: user.timezone, now, schedule }),
       )}
       quota={{ used: profiles.pagination.totalItems, limit: LIMITS.profilesPerUser }}
       activity={{ query: filters, page: activity }}
+      schedule={schedule}
     />
   );
 }

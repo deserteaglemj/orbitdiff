@@ -1,7 +1,11 @@
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { profileCard } from "@/components/dashboard/card-model";
+import { formatLocalTime } from "@/components/dashboard/local-time";
 import { LIMITS } from "@/domain/limits";
-import { closeDb } from "@/server/db/client";
+import { closeDb, getDb } from "@/server/db/client";
+import { profile } from "@/server/db/schema";
 import { runTick } from "@/server/jobs/tick";
 import type { JobHandler } from "@/server/jobs/worker";
 import type { AccountExport } from "@/server/services/account";
@@ -123,8 +127,12 @@ describe("an import with only followers and no completeness declaration", () => 
 
     expect(await readProfile(browser, profileId)).toMatchObject({ processing: false, snapshotCount: 2, capturedAt: SECOND_CAPTURE });
     expect(await readEvents(browser, profileId)).toMatchObject({ data: [], pagination: { totalItems: 0 } });
+    // Neither list was complete, so nothing could be compared: unknown, never "no difference".
     const processed = (await readActivity(browser, "?kind=import_processed")).data;
-    expect(processed.map((entry) => entry.title).sort()).toEqual(["Baseline stored", "No differences observed"]);
+    expect(processed.map((entry) => entry.title).sort()).toEqual(["Baseline stored", "Nothing could be compared"]);
+    expect(processed.find((entry) => entry.title === "Nothing could be compared")?.detail).toContain(
+      "whether anything differs is unknown",
+    );
   });
 });
 
@@ -308,6 +316,47 @@ describe("a derive job that fails", () => {
       "follower_observed_removed",
     ]);
     expect(kinds(await readActivity(browser))).toContain("job_failed");
+  });
+});
+
+describe("a processing failure followed by a review", () => {
+  it("stays on the dashboard card until an import is processed, however many reviews succeed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { browser, profileId } = await atlasWithProfile();
+    await importInto(browser, profileId, FIRST_EXPORT);
+    const processedAt = (await readActivity(browser, "?kind=import_processed")).data[0]?.occurredAt ?? null;
+
+    setTestEnv({ CAPACITY_MAX_JOBS_PER_DAY: "1" });
+    await importInto(browser, profileId, SECOND_EXPORT);
+    restoreTestEnv();
+
+    const broken: JobHandler = async () => {
+      throw new Error("boom");
+    };
+    const handlers = { derive_profile: broken };
+    const start = Date.now();
+    const times = [0, LIMITS.jobBackoffMs[0], LIMITS.jobBackoffMs[0] + LIMITS.jobBackoffMs[1]].map(
+      (offset) => new Date(start + offset),
+    );
+    await runTick({ now: times[0]!, handlers });
+    await runTick({ now: times[1]!, handlers });
+    // The daily review falls due in the run where processing fails for the last time.
+    await getDb().update(profile).set({ nextReviewAt: times[2] }).where(eq(profile.id, profileId));
+    expect(await runTick({ now: times[2]!, handlers })).toMatchObject({ claimed: 2, succeeded: 1, failed: 1 });
+
+    const after = await readProfile(browser, profileId);
+    expect(after).toMatchObject({
+      processing: true,
+      activeJob: null,
+      lastReviewAt: times[2]!.toISOString(),
+      processingFailure: { failedAt: times[2]!.toISOString(), code: "handler_error" },
+    });
+    const card = profileCard(after, { counts: null, lastProcessedAt: processedAt, timeZone: "UTC", now: times[2]! });
+    expect(card.failure?.title).toBe("Processing an import failed");
+    expect(card.failure?.lastSuccess).toBe(
+      `Last processed result: ${formatLocalTime(processedAt, "UTC")}. It is unchanged.`,
+    );
+    expect(card.processing?.title).toBe("Processing failed");
   });
 });
 

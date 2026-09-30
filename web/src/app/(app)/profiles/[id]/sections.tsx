@@ -2,7 +2,7 @@ import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { readActivityQuery } from "@/components/dashboard/activity-model";
 import { type PageQuery, readChoice, readPage, readSearch } from "@/components/dashboard/query";
 import { importHrefOf, SECTION_ANCHOR } from "@/components/profile/profile-screen";
-import { changesState, EVENT_TYPES, profileHref, RELATIONSHIPS } from "@/components/profile/rows";
+import { changesState, EVENT_TYPES, profileHref, RELATIONSHIPS, snapshotComparison } from "@/components/profile/rows";
 import { ChangesSection, CountsSection, ImportsSection, RelationshipsSection } from "@/components/profile/sections";
 import { LIMITS } from "@/domain/limits";
 import { listActivity } from "@/server/services/activity";
@@ -60,6 +60,9 @@ export async function ChangesLoader({ userId, profile, query, timeZone }: Sectio
     last: dated[0]?.capturedAt ?? null,
     timeZone,
     processing: profile.processing,
+    processingFailed: profile.processingFailure !== null,
+    // Every stored import is in this page (pageSize is the per-profile maximum).
+    comparison: snapshotComparison(snapshots.data),
   });
   return (
     <ChangesSection

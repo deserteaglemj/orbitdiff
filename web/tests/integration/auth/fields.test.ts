@@ -90,6 +90,18 @@ describe("fields a client cannot grant itself", () => {
     expect(await userRow()).toMatchObject({ name: "Atlas Studio", timezone: "America/New_York" });
   });
 
+  it("stores a timezone written in another case under its canonical name at update-user", async () => {
+    const { cookie } = await createVerifiedUser({ email: EMAIL, name: "Atlas" });
+    const response = await authRequest("/update-user", { json: { timezone: "america/new_york" }, cookie });
+    expect(response.status).toBe(200);
+    expect(await userRow()).toMatchObject({ timezone: "America/New_York" });
+  });
+
+  it("stores a timezone written in another case under its canonical name at sign-up", async () => {
+    expect((await signUp({ email: EMAIL, timezone: "aSiA/tOkYo" })).status).toBe(200);
+    expect(await userRow()).toMatchObject({ timezone: "Asia/Tokyo" });
+  });
+
   it("rejects an invalid timezone or an empty name at update-user", async () => {
     const { cookie } = await createVerifiedUser({ email: EMAIL, name: "Atlas" });
     const zone = await authRequest("/update-user", { json: { timezone: "Mars/Olympus" }, cookie });

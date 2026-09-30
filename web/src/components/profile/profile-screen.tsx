@@ -10,6 +10,8 @@ import {
   profilePaused,
   profileProcessing,
   profileStats,
+  schedulePause,
+  shownExport,
   sourceLine,
   staleNote,
   statusBadges,
@@ -18,7 +20,7 @@ import {
 import { formatLocalTime } from "@/components/dashboard/local-time";
 import { FactList } from "@/components/dashboard/profile-card";
 import { cx, Notice, StatGrid, StatTile } from "@/components/ui";
-import type { ProfileDto } from "@/server/services/contracts";
+import type { ProfileDto, ScheduleStateDto } from "@/server/services/contracts";
 
 import { ProcessingWatcher } from "./processing-watcher";
 import { ProfileHeader } from "./profile-header";
@@ -45,6 +47,7 @@ export function ProfileScreen({
   lastProcessedAt,
   tab,
   now,
+  schedule = null,
   children,
 }: {
   profile: ProfileDto;
@@ -54,17 +57,22 @@ export function ProfileScreen({
   tab: ProfileTab;
   /** The time of the request: the clock the age of the export is measured against. */
   now: Date;
+  /** Whether scheduled work runs or is paused at the daily job capacity. */
+  schedule?: ScheduleStateDto | null;
   /** The open section. */
   children: ReactNode;
 }) {
   const importHref = importHrefOf(profile.id);
-  const failure = profileFailure(profile, timeZone);
+  // The badge, the age, and the source line describe the export the numbers below come from.
+  const shown = shownExport(profile);
+  const failure = profileFailure(profile, timeZone, lastProcessedAt);
   const paused = profilePaused(profile, timeZone);
-  const processing = profileProcessing(profile);
+  const scheduleNotice = profile.status === "paused" ? null : schedulePause(schedule, timeZone);
+  const processing = profileProcessing(profile, timeZone);
   const coverage = coverageText(profile.coverage);
-  const stale = staleNote(profile, now);
+  const stale = staleNote(shown, now);
   const badges: StatusBadge[] = [
-    ...statusBadges(profile, now),
+    ...statusBadges(shown, now),
     ...(processing ? [{ tone: "info" as const, text: processing.title }] : []),
     ...(paused ? [{ tone: "neutral" as const, text: "Paused" }] : []),
   ];
@@ -75,7 +83,7 @@ export function ProfileScreen({
       label: "Last import received",
       value: profile.lastImportAt === null ? "None yet" : formatLocalTime(profile.lastImportAt, timeZone),
     },
-    ...profileFacts(profile, { lastProcessedAt, timeZone }),
+    ...profileFacts(profile, { lastProcessedAt, timeZone, now, schedule }),
   ];
   const current = PROFILE_TABS.find((entry) => entry.id === tab) ?? PROFILE_TABS[0];
 
@@ -91,7 +99,7 @@ export function ProfileScreen({
           profileId={profile.id}
           handle={profile.handle}
           status={profile.status}
-          sourceLine={sourceLine(profile, timeZone)}
+          sourceLine={sourceLine(shown, timeZone)}
           badges={badges}
           snapshotCount={profile.snapshotCount}
           timeZone={timeZone}
@@ -111,7 +119,7 @@ export function ProfileScreen({
           <p>{stale} The numbers below describe that export, not today.</p>
         </Notice>
       ) : null}
-      {profile.evidence === "degraded" ? (
+      {shown.evidence === "degraded" ? (
         <Notice tone="warning" className="mt-4" title="Coverage is incomplete.">
           <p>{evidenceNote("degraded")}</p>
         </Notice>
@@ -119,6 +127,11 @@ export function ProfileScreen({
       {paused ? (
         <Notice tone="info" label="Paused" className="mt-4" title={paused.title}>
           <p>{paused.detail} Resume the profile to schedule reviews again.</p>
+        </Notice>
+      ) : null}
+      {scheduleNotice ? (
+        <Notice tone="info" label="Paused" className="mt-4" title={scheduleNotice.title}>
+          <p>{scheduleNotice.detail}</p>
         </Notice>
       ) : null}
       <ProcessingWatcher

@@ -39,7 +39,7 @@ The placeholders below are shapes, not values. Generate every secret yourself, f
 | `EMAIL_TRANSPORT` | `capture` stores account mail in the database instead of sending it (tests and staging; refused when `APP_STAGE=production`). `none` sends nothing and closes registration. Default `none`. | No | `none` |
 | `MAILBOX_SECRET` | The credential of `GET /api/staging/mailbox`, which returns captured mail for an address. At least 32 characters. Required when `APP_STAGE=staging` and mail is captured. The endpoint does not exist in production or without this value. | Yes | `<generate: 32 random bytes as hex>` |
 | `SIGNUP_ACCESS_CODE` | When set, sign-up must carry this code in the `x-signup-code` request header. At least 12 characters. Optional. Use it to keep a preview private. | Yes | `<a phrase you hand to invited people>` |
-| `CAPACITY_MAX_USERS` | Registered accounts. At the limit registration pauses with a visible reason. Positive integer, default 250. | No | `250` |
+| `CAPACITY_MAX_USERS` | Verified accounts. At the limit registration pauses with a visible reason. Accounts that wait for verification take no place; at most this many of them are kept, and a new sign-up removes the oldest to make room, so nobody can close registration with made-up addresses. Positive integer, default 250. | No | `250` |
 | `CAPACITY_MAX_JOBS_PER_DAY` | Jobs started per UTC day. At the limit scheduled work pauses until the next UTC day. Positive integer, default 2000. | No | `2000` |
 | `CAPACITY_MAX_DB_BYTES` | Database size at which imports pause. Set it below the limit of the database plan. Positive integer, default 419430400 (400 MB). | No | `419430400` |
 | `CLIENT_IP_HEADER` | The request header that carries the client address for the per-client rate limit. The platform must set and overwrite it. Default `x-forwarded-for`, which Vercel overwrites. It can never be a header that carries a credential. | No | `x-forwarded-for` |
@@ -60,7 +60,7 @@ Rules that tie them together:
 | A database | `DATABASE_URL` is configured and reachable, and the other required variables are valid. | Health answers `unconfigured` or `degraded`; registration is closed. |
 | Operator name | `OPERATOR_NAME` names who runs the service. | Closed: "the operator of this service has not been named yet". |
 | Mail delivery | Account mail can reach the person. Today that means `EMAIL_TRANSPORT=capture`, which is allowed outside production only. | Closed: "email delivery is not configured". |
-| Capacity | Fewer accounts than `CAPACITY_MAX_USERS`. | Paused: "capacity reached". |
+| Capacity | Fewer verified accounts than `CAPACITY_MAX_USERS`. An account that was never verified does not count. | Paused: "capacity reached". |
 | Access code | Only when `SIGNUP_ACCESS_CODE` is set: the request carries it. | The request is refused with `ACCESS_CODE_REQUIRED`. Registration still reads as open, with `accessCodeRequired: true`. |
 | Consent | The request names the current versions of the Terms and the Privacy notice. | The request is refused with `TERMS_NOT_ACCEPTED` or `PRIVACY_NOT_ACCEPTED`. |
 
@@ -99,7 +99,7 @@ Two rules of GitHub Actions matter here:
 - **Scheduled runs start only from the default branch.** The schedule does nothing until the workflow file is on the default branch, and it always runs the version of the file that is there.
 - **The 60 day rule.** In a public repository GitHub disables scheduled workflows after 60 days without repository activity. Re-enable it from the Actions tab or with `gh workflow enable orbitdiff-web-jobs.yml`. Until then no reviews run and failed work is not retried; imports are still processed right after they arrive.
 
-Runs can be delayed or dropped when GitHub is busy. The next run catches up, because everything the tick does is keyed so that it happens once.
+Runs can be delayed or dropped when GitHub is busy. The next run catches up, because everything the tick does is keyed so that it happens once. One run drains up to 200 jobs inside its 45 second budget, more than the reviews that fall due in an hour at the registration cap. A daily review that is still waiting when its profile's next review falls due keeps the profile due, so the later day's review runs after it instead of being merged into it. Until then the pages say the review is overdue.
 
 ### Running it by hand
 
@@ -126,7 +126,7 @@ The answer holds counts and flags only:
   "pausedForCapacity": false }
 ```
 
-Without the right secret the endpoint answers 404, the same as a route that does not exist. `GET /api/health` shows when the tick last ran as `lastTick.at`, and nothing else about it. `pausedForCapacity: true` means the day's job count reached `CAPACITY_MAX_JOBS_PER_DAY`; scheduled work resumes on the next UTC day.
+Without the right secret the endpoint answers 404, the same as a route that does not exist. `GET /api/health` shows when the tick last ran as `lastTick.at`, and nothing else about it. `pausedForCapacity: true` means the day's job count reached `CAPACITY_MAX_JOBS_PER_DAY`; scheduled work resumes on the next UTC day. While it is paused, the dashboard, every profile page, and the settings page show a notice with that reason and the time it resumes.
 
 ## 5. Deployment, once the owner provides a database
 

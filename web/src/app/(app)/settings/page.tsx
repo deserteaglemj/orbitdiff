@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { nextReviewCaveat } from "@/components/dashboard/card-model";
 import { RouteRefreshProvider } from "@/components/settings/refresh-context";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { buildTimezoneList } from "@/components/settings/timezones";
 import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
 import { resolvePageAccess } from "@/server/auth/page-access";
+import { readScheduleState } from "@/server/jobs/capacity";
 import { getMe } from "@/server/services/account";
 import { listProfiles } from "@/server/services/profiles";
 
@@ -33,9 +35,10 @@ export default async function SettingsPage() {
   if (access.kind === "suspended") return null;
 
   const now = new Date();
-  const [me, profiles] = await Promise.all([
+  const [me, profiles, schedule] = await Promise.all([
     getMe(access.user.id, now),
     listProfiles(access.user.id, { page: 1, pageSize: LIMITS.pageSizeMax }, now),
+    readScheduleState(now),
   ]);
   return (
     <RouteRefreshProvider>
@@ -48,7 +51,10 @@ export default async function SettingsPage() {
           handle: profile.handle,
           status: profile.status,
           nextReviewAt: profile.nextReviewAt,
+          // A time that has passed, or that waits for the capacity to reset, is not the next review.
+          caveat: nextReviewCaveat(profile, { timeZone: me.timezone, now, schedule }),
         }))}
+        schedule={schedule}
       />
     </RouteRefreshProvider>
   );

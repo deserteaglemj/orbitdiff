@@ -6,6 +6,7 @@ import { type Executor, getDb } from "@/server/db/client";
 import { systemState, usageDaily } from "@/server/db/schema";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import type { ScheduleStateDto } from "@/server/services/contracts";
 import {
   DATABASE_SIZE_STATE_KEY,
   type DatabaseSizeState,
@@ -90,6 +91,20 @@ export async function reserveJobStarts(tx: Executor, now: Date, wanted: number):
       .where(and(eq(usageDaily.day, day), eq(usageDaily.scopeKey, GLOBAL_SCOPE)));
   }
   return { granted, exhausted: false };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether scheduled work runs at `now`, for the signed-in pages: paused while
+ * the day's job count has reached CAPACITY_MAX_JOBS_PER_DAY, until the next UTC
+ * midnight, when the count starts again. Holds no account data.
+ */
+export async function readScheduleState(now: Date, executor: Executor = getDb()): Promise<ScheduleStateDto> {
+  const capacity = await readJobCapacity(now, executor);
+  if (!capacity.paused) return { paused: false, resumesAt: null };
+  const nextDay = new Date((Math.floor(now.getTime() / DAY_MS) + 1) * DAY_MS);
+  return { paused: true, resumesAt: nextDay.toISOString() };
 }
 
 /** Throws `capacity_paused` while the day's job capacity is used up. Nothing falls through to a paid tier. */

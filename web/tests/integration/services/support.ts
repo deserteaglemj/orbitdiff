@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { formatCaptureTime } from "@/domain/capture-time";
-import { buildView, type Snapshot } from "@/domain/export/snapshot";
+import { buildView, comparability, coverage, type Snapshot } from "@/domain/export/snapshot";
 import { CONSENT_VERSIONS } from "@/domain/limits";
 import { getDb } from "@/server/db/client";
 import { activityEntry, changeEvent, exportSnapshot, job, profile } from "@/server/db/schema";
@@ -145,6 +145,23 @@ export async function markDerived(
     eventCount: events.length,
     added: { followers: 0, following: 0 },
     removed: { followers: 0, following: 0 },
+    // As the derive job records it: which comparisons the dated history allowed.
+    comparison: comparability(
+      snapshots.map((row) => {
+        const snapshot: Snapshot = {
+          followers: row.followers,
+          following: row.following,
+          shards: { followers: row.followersShards, following: row.followingShards },
+          capturedAt: row.capturedAt ? formatCaptureTime(row.capturedAt) : null,
+          declarations: { followers: row.declaredCompleteFollowers, following: row.declaredCompleteFollowing },
+        };
+        return {
+          capturedAt: snapshot.capturedAt,
+          followers: coverage(snapshot, "followers"),
+          following: coverage(snapshot, "following"),
+        };
+      }),
+    ),
     ...options.processed,
   };
   await db.insert(activityEntry).values({

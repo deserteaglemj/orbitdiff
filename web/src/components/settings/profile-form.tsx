@@ -172,6 +172,12 @@ export interface ScheduledProfile {
   status: "active" | "paused";
   /** ISO time of the next daily review. Null when the profile is paused. */
   nextReviewAt: string | null;
+  /**
+   * Said in place of that time when it does not hold: the review is overdue, or
+   * scheduled reviews are paused at the daily job capacity. Worked out by the
+   * server at the time of the request.
+   */
+  caveat?: string | null;
 }
 
 /**
@@ -204,9 +210,11 @@ export function ReviewSchedule({ profiles, timeZone }: { profiles: ScheduledProf
               <span className="text-muted tabular-nums">
                 {profile.status === "paused"
                   ? "Paused. No review is scheduled."
-                  : profile.nextReviewAt
-                    ? formatDateTime(profile.nextReviewAt, timeZone)
-                    : "No review is scheduled."}
+                  : profile.caveat
+                    ? profile.caveat
+                    : profile.nextReviewAt
+                      ? formatDateTime(profile.nextReviewAt, timeZone)
+                      : "No review is scheduled."}
               </span>
             </li>
           ))}

@@ -18,20 +18,61 @@ const HOUR_MS = 3_600_000;
 /** Wider than any offset (-12:00 to +14:00) plus any clock shift. */
 const WINDOW_MS = 26 * HOUR_MS;
 
+/**
+ * More than the runtime has canonical zone names (about 600 with the Etc zones).
+ * The cache is keyed by canonical names only, so it never reaches this; the
+ * bound is a second line of defence.
+ */
+const MAX_CACHED_ZONES = 1_024;
+
+/**
+ * One formatter per canonical zone name. `Intl` matches zone names without
+ * regard to case and resolves links ("europe/berlin", "US/Eastern"), so a key
+ * taken from the caller's spelling would grow with every new spelling. Only the
+ * name `Intl` resolves a value to is ever used as a key.
+ */
 const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The one name `Intl` gives a timezone, or null when it is not a zone name `Intl`
+ * knows. Every capitalisation and every link of a zone resolves to the same name:
+ * "eUrOpE/bErLiN" is "Europe/Berlin". UTC offsets such as "+05:00" are not names.
+ * Store and compare this value, never the caller's spelling.
+ */
+export function canonicalTimezone(value: unknown): string | null {
+  if (typeof value !== "string" || !ZONE_NAME.test(value)) {
+    return null;
+  }
+  if (formatters.has(value)) {
+    return value;
+  }
+  let resolved: string;
+  try {
+    // A throwaway formatter: it is not kept, so an unusual spelling costs nothing lasting.
+    resolved = new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+  return typeof resolved === "string" && ZONE_NAME.test(resolved) ? resolved : null;
+}
 
 function formatterFor(timezone: string): Intl.DateTimeFormat {
   const cached = formatters.get(timezone);
   if (cached !== undefined) {
     return cached;
   }
-  if (typeof timezone !== "string" || !ZONE_NAME.test(timezone)) {
+  const zone = canonicalTimezone(timezone);
+  if (zone === null) {
     throw new DomainError("invalid_timezone", "A valid IANA timezone is required.");
+  }
+  const known = formatters.get(zone);
+  if (known !== undefined) {
+    return known;
   }
   let created: Intl.DateTimeFormat;
   try {
     created = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
+      timeZone: zone,
       hourCycle: "h23",
       year: "numeric",
       month: "2-digit",
@@ -43,21 +84,19 @@ function formatterFor(timezone: string): Intl.DateTimeFormat {
   } catch {
     throw new DomainError("invalid_timezone", "A valid IANA timezone is required.");
   }
-  formatters.set(timezone, created);
+  if (formatters.size >= MAX_CACHED_ZONES) {
+    formatters.clear();
+  }
+  formatters.set(zone, created);
   return created;
 }
 
-/** True for a timezone name `Intl` knows. UTC offsets such as "+05:00" are not names. */
+/**
+ * True for a timezone name `Intl` knows, in any capitalisation. UTC offsets
+ * such as "+05:00" are not names. Store canonicalTimezone(value), not the value.
+ */
 export function isValidTimezone(value: unknown): value is string {
-  if (typeof value !== "string") {
-    return false;
-  }
-  try {
-    formatterFor(value);
-    return true;
-  } catch {
-    return false;
-  }
+  return canonicalTimezone(value) !== null;
 }
 
 interface WallTime {

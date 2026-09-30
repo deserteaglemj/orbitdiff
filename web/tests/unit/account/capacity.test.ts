@@ -39,7 +39,7 @@ function item(capacity: CapacityDto, key: CapacityItem["key"], now: Date = NOW):
 describe("capacityItems", () => {
   it("lists the six things the operator watches, in a fixed order", () => {
     expect(capacityItems(healthy, NOW).map((entry) => [entry.key, entry.title])).toEqual([
-      ["users", "Accounts"],
+      ["users", "Verified accounts"],
       ["jobsToday", "Jobs today"],
       ["database", "Database size"],
       ["mail", "Account mail"],
@@ -55,11 +55,13 @@ describe("capacityItems", () => {
   describe("accounts against the cap", () => {
     it("shows the count against the cap", () => {
       expect(item(healthy, "users")).toMatchObject({
-        value: "12 of 250 accounts",
+        title: "Verified accounts",
+        value: "12 of 250 verified accounts",
         badge: "Within the cap",
         tone: "ok",
         paused: false,
-        detail: "The cap is not reached, so it does not pause registration.",
+        detail:
+          "The cap is not reached, so it does not pause registration. Accounts that wait for verification do not count.",
       });
     });
 
@@ -71,11 +73,11 @@ describe("capacityItems", () => {
     it("shows a paused state and what it pauses when the cap is reached", () => {
       const full = { ...healthy, users: { used: 250, limit: 250, paused: true } };
       expect(item(full, "users")).toMatchObject({
-        value: "250 of 250 accounts",
+        value: "250 of 250 verified accounts",
         badge: "Paused",
         tone: "warning",
         paused: true,
-        detail: "Registration is paused: the account cap is reached. Existing accounts are not affected.",
+        detail: "Registration is paused: the cap on verified accounts is reached. Existing accounts are not affected.",
       });
     });
 

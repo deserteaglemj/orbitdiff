@@ -173,6 +173,14 @@ const buildSections = (operatorName: string | null): LegalSection[] => [
             {formatCount(LIMITS.retainCapturedMailDays)} days.
           </li>
           <li>A sign-in session ends when you sign out, when it expires, or when you delete your account.</li>
+          <li>
+            An account keeps at most {formatCount(LIMITS.sessionsPerUser)} sign-in sessions: a new sign-in ends the
+            oldest. An expired session is removed.
+          </li>
+          <li>
+            Security events, such as a completed password reset or a refused registration, are removed after{" "}
+            {formatCount(LIMITS.retainAuditDays)} days.
+          </li>
         </ul>
       </>
     ),

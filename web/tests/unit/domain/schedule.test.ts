@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DomainError } from "@/domain/errors";
-import { isValidTimezone, localDateKey, nextReviewAt } from "@/domain/schedule";
+import { canonicalTimezone, isValidTimezone, localDateKey, nextReviewAt } from "@/domain/schedule";
 
 const at = (iso: string): Date => new Date(iso);
 const next = (iso: string, timezone: string, hour: number): string =>
@@ -19,6 +19,38 @@ describe("isValidTimezone", () => {
     "rejects %j",
     (timezone) => {
       expect(isValidTimezone(timezone)).toBe(false);
+    },
+  );
+});
+
+describe("canonicalTimezone", () => {
+  it.each([
+    ["Europe/Berlin", "Europe/Berlin"],
+    ["europe/berlin", "Europe/Berlin"],
+    ["EUROPE/BERLIN", "Europe/Berlin"],
+    ["eUrOpE/bErLiN", "Europe/Berlin"],
+    ["utc", "UTC"],
+    ["america/chicago", "America/Chicago"],
+  ])("names %s by the one name Intl gives it, %s", (value, canonical) => {
+    expect(canonicalTimezone(value)).toBe(canonical);
+  });
+
+  it("gives every capitalisation of a zone the same name, so no variant is a new value", () => {
+    const zone = "America/Argentina/ComodRivadavia";
+    const variants = Array.from({ length: 64 }, (_, index) =>
+      [...zone].map((character, position) => ((index >> position % 6) & 1 ? character.toUpperCase() : character.toLowerCase())).join(""),
+    );
+    expect(new Set(variants).size).toBeGreaterThan(32);
+    const names = new Set(variants.map((variant) => canonicalTimezone(variant)));
+    expect(names.size).toBe(1);
+    expect([...names][0]).toBe(canonicalTimezone(zone));
+    expect(isValidTimezone([...names][0])).toBe(true);
+  });
+
+  it.each(["", " ", "Mars/Olympus", "+05:00", "-0600", "America/Chicago ", "UTC\n", "a".repeat(200), 5, null, undefined, {}])(
+    "returns null for %j",
+    (value) => {
+      expect(canonicalTimezone(value)).toBeNull();
     },
   );
 });

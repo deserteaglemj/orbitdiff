@@ -3,7 +3,13 @@ import { formatDate } from "@/components/ui/format";
 import type { SparkPoint } from "@/components/ui/sparkline-geometry";
 import { captureTimeMillis } from "@/domain/capture-time";
 import { LIMITS } from "@/domain/limits";
-import type { CountHistoryDto, CoverageDto, EvidenceStatus, ProfileDto } from "@/server/services/contracts";
+import type {
+  CountHistoryDto,
+  CoverageDto,
+  EvidenceStatus,
+  ProfileDto,
+  ScheduleStateDto,
+} from "@/server/services/contracts";
 
 import { formatLocalTime } from "./local-time";
 
@@ -105,6 +111,27 @@ export function statusNotes(profile: Aged, now: Date): string[] {
   return notes;
 }
 
+type Shown = Pick<ProfileDto, "currentSnapshotId" | "capturedAt" | "evidence">;
+
+/**
+ * The export the numbers of a profile describe, for the badge, the age, and the
+ * source line. Coverage and counts come from the last processed export, so while
+ * a newer import waits for processing they describe that older export, and so
+ * must everything said about them. Otherwise it is the current export.
+ */
+export function shownExport(
+  profile: Shown & Pick<ProfileDto, "processing"> & Partial<Pick<ProfileDto, "processed">>,
+): Shown {
+  if (profile.processing && profile.processed) {
+    return {
+      currentSnapshotId: profile.processed.snapshotId,
+      capturedAt: profile.processed.capturedAt,
+      evidence: profile.processed.evidence,
+    };
+  }
+  return { currentSnapshotId: profile.currentSnapshotId, capturedAt: profile.capturedAt, evidence: profile.evidence };
+}
+
 /** Where the numbers come from: the owner's own export and the capture time the owner declared. */
 export function sourceLine(profile: Pick<ProfileDto, "currentSnapshotId" | "capturedAt">, timeZone: string): string {
   if (profile.currentSnapshotId === null) return "No import yet";
@@ -158,6 +185,8 @@ export interface CardExtras {
   timeZone: string;
   /** The time of the request: the clock the age of the export is measured against. */
   now: Date;
+  /** Whether scheduled work runs or is paused at the daily job capacity. Unknown when absent. */
+  schedule?: ScheduleStateDto | null;
 }
 
 export interface CardState {
@@ -214,10 +243,39 @@ function failureStands(profile: Pick<ProfileDto, "lastFailureAt" | "lastSuccessA
   return new Date(profile.lastFailureAt).getTime() > new Date(profile.lastSuccessAt).getTime();
 }
 
+type FailureFacts = Pick<ProfileDto, "lastFailureAt" | "lastFailureCode" | "lastSuccessAt"> &
+  Partial<Pick<ProfileDto, "processingFailure" | "activeJob">>;
+
+/** What happens next to a failed processing job: a queued retry, or the daily repair. */
+function retryWords(profile: Partial<Pick<ProfileDto, "activeJob">>): string {
+  return profile.activeJob?.kind === "derive_profile" ? "It is being tried again." : "It is tried again once a day.";
+}
+
+/**
+ * The failure notice, or null when no failure stands.
+ *
+ * A failed processing of the newest import stands until an import is processed
+ * again: a review succeeding afterwards processes nothing, so it does not hide
+ * it. Its success line is the last processed result (`lastProcessedAt`), the one
+ * the numbers show. Any other failure stands while no later job has succeeded.
+ */
 export function profileFailure(
-  profile: Pick<ProfileDto, "lastFailureAt" | "lastFailureCode" | "lastSuccessAt">,
+  profile: FailureFacts,
   timeZone: string,
+  lastProcessedAt: string | null = null,
 ): CardFailure | null {
+  const processing = profile.processingFailure ?? null;
+  if (processing !== null) {
+    const code = processing.code ? ` Reason code: ${processing.code}.` : "";
+    return {
+      title: "Processing an import failed",
+      failed: `Failed on ${formatLocalTime(processing.failedAt, timeZone)}.${code} ${retryWords(profile)}`,
+      lastSuccess:
+        lastProcessedAt === null
+          ? "There is no earlier processed result."
+          : `Last processed result: ${formatLocalTime(lastProcessedAt, timeZone)}. It is unchanged.`,
+    };
+  }
   if (!failureStands(profile)) return null;
   const code = profile.lastFailureCode ? ` Reason code: ${profile.lastFailureCode}.` : "";
   return {
@@ -230,14 +288,47 @@ export function profileFailure(
   };
 }
 
-export function profileProcessing(profile: Pick<ProfileDto, "processing" | "activeJob">): CardState | null {
+function capturedWords(capturedAt: string | null, timeZone: string): string {
+  return capturedAt === null ? "with no capture time" : `captured ${formatLocalTime(capturedAt, timeZone)}`;
+}
+
+type ProcessingFacts = Pick<ProfileDto, "processing" | "activeJob"> &
+  Partial<Pick<ProfileDto, "processed" | "processingFailure" | "currentSnapshotId" | "capturedAt">>;
+
+/**
+ * The processing state of a profile, or null when nothing waits. A newer export
+ * that waits is named apart from the numbers, which still describe the last
+ * processed export. A failed processing says so, instead of reading as pending.
+ */
+export function profileProcessing(profile: ProcessingFacts, timeZone = "UTC"): CardState | null {
   if (!profile.processing) return null;
+  if (profile.processingFailure) {
+    return {
+      title: "Processing failed",
+      detail: `Processing the newest import failed. ${retryWords(profile)} Until then this shows the last processed result.`,
+    };
+  }
+  const processed = profile.processed ?? null;
+  const newer =
+    processed !== null &&
+    profile.currentSnapshotId !== undefined &&
+    profile.currentSnapshotId !== null &&
+    processed.snapshotId !== profile.currentSnapshotId;
+  const shows = newer
+    ? `Until then this shows the last processed result, from the export ${capturedWords(processed.capturedAt, timeZone)}.`
+    : "Until then this shows the last processed result.";
   const retried = (profile.activeJob?.attempts ?? 0) > 1 || Boolean(profile.activeJob?.lastErrorCode);
+  if (retried) {
+    return {
+      title: "Processing import",
+      detail: `An import is stored and an earlier attempt to process it did not finish. It will be tried again. ${shows}`,
+    };
+  }
   return {
     title: "Processing import",
-    detail: retried
-      ? "An import is stored and an earlier attempt to process it did not finish. It will be tried again. Until then this shows the last processed result."
-      : "An import is stored and waiting to be processed. Until then this shows the last processed result.",
+    detail: newer
+      ? `A newer export, ${capturedWords(profile.capturedAt ?? null, timeZone)}, is stored and waiting to be processed. ${shows}`
+      : `An import is stored and waiting to be processed. ${shows}`,
   };
 }
 
@@ -282,16 +373,60 @@ export function netChanges(counts: CountHistoryDto | null): ProfileCardModel["ne
   return changes;
 }
 
+const CAPACITY_REASON = "the service reached its daily job capacity";
+
+/**
+ * When the next scheduled review runs, in words. A time that has passed is not
+ * the next review: it is overdue and runs at the next hourly run. While the
+ * daily job capacity is used up, reviews wait until it resets, and that is said
+ * with the reason.
+ */
+type ScheduleFacts = Pick<CardExtras, "timeZone"> & Partial<Pick<CardExtras, "now" | "schedule">>;
+
+/**
+ * What to say in place of the stored next review time when that time does not
+ * hold: reviews are paused at the daily job capacity, or the time has passed.
+ * Null when the stored time is the next review.
+ */
+export function nextReviewCaveat(
+  profile: Pick<ProfileDto, "status" | "nextReviewAt">,
+  extras: ScheduleFacts,
+): string | null {
+  if (profile.status === "paused" || profile.nextReviewAt === null) return null;
+  const schedule = extras.schedule ?? null;
+  if (schedule?.paused) {
+    return schedule.resumesAt === null
+      ? `Paused: ${CAPACITY_REASON}.`
+      : `Paused until ${formatLocalTime(schedule.resumesAt, extras.timeZone)}: ${CAPACITY_REASON}.`;
+  }
+  if (extras.now !== undefined && new Date(profile.nextReviewAt).getTime() <= extras.now.getTime()) {
+    return `Overdue since ${formatLocalTime(profile.nextReviewAt, extras.timeZone)}. It runs at the next hourly run.`;
+  }
+  return null;
+}
+
+function nextReviewText(profile: Pick<ProfileDto, "status" | "nextReviewAt">, extras: ScheduleFacts): string {
+  if (profile.status === "paused") return "Paused";
+  if (profile.nextReviewAt === null) return "Not scheduled";
+  return nextReviewCaveat(profile, extras) ?? formatLocalTime(profile.nextReviewAt, extras.timeZone);
+}
+
+/** The notice that scheduled work is paused, with the reason and when it resumes, or null while it runs. */
+export function schedulePause(schedule: ScheduleStateDto | null | undefined, timeZone: string): CardState | null {
+  if (!schedule?.paused) return null;
+  const when =
+    schedule.resumesAt === null ? "on the next UTC day" : `at ${formatLocalTime(schedule.resumesAt, timeZone)}`;
+  return {
+    title: "Scheduled reviews are paused",
+    detail: `The service reached its daily job capacity. Reviews, and the processing of new imports, resume ${when}. Your stored imports and results are unchanged.`,
+  };
+}
+
 export function profileFacts(
   profile: Pick<ProfileDto, "status" | "lastReviewAt" | "nextReviewAt">,
-  extras: Pick<CardExtras, "lastProcessedAt" | "timeZone">,
+  extras: Pick<CardExtras, "lastProcessedAt" | "timeZone"> & Partial<Pick<CardExtras, "now" | "schedule">>,
 ): ProfileCardModel["facts"] {
-  const next =
-    profile.status === "paused"
-      ? "Paused"
-      : profile.nextReviewAt === null
-        ? "Not scheduled"
-        : formatLocalTime(profile.nextReviewAt, extras.timeZone);
+  const next = nextReviewText(profile, extras);
   return [
     { label: "Last processed import", value: when(extras.lastProcessedAt, extras.timeZone) },
     { label: "Last successful review", value: when(profile.lastReviewAt, extras.timeZone) },
@@ -301,22 +436,24 @@ export function profileFacts(
 
 /** Everything one dashboard card shows for a profile. */
 export function profileCard(profile: ProfileDto, extras: CardExtras): ProfileCardModel {
+  // The badge, the age, and the source line describe the export the numbers come from.
+  const shown = shownExport(profile);
   return {
     id: profile.id,
     handle: profile.handle,
     profileHref: `/profiles/${profile.id}`,
     importHref: `/profiles/${profile.id}/import`,
     hasImport: profile.currentSnapshotId !== null,
-    badges: statusBadges(profile, extras.now),
-    notes: statusNotes(profile, extras.now),
+    badges: statusBadges(shown, extras.now),
+    notes: statusNotes(shown, extras.now),
     stats: profileStats(profile.metrics),
-    sourceLine: sourceLine(profile, extras.timeZone),
+    sourceLine: sourceLine(shown, extras.timeZone),
     coverage: coverageText(profile.coverage),
     facts: profileFacts(profile, extras),
-    processing: profileProcessing(profile),
-    failure: profileFailure(profile, extras.timeZone),
+    processing: profileProcessing(profile, extras.timeZone),
+    failure: profileFailure(profile, extras.timeZone, extras.lastProcessedAt),
     paused: profilePaused(profile, extras.timeZone),
-    stale: staleNote(profile, extras.now) !== null,
+    stale: staleNote(shown, extras.now) !== null,
     trend: countTrend(extras.counts, extras.timeZone),
     netChanges: netChanges(extras.counts),
   };

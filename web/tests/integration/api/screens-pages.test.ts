@@ -14,9 +14,10 @@ import { describeApiFailure, type ApiResult } from "@/components/onboarding/api"
 import { SettingsScreen, type SettingsScreenProps } from "@/components/settings/settings-screen";
 import { CONSENT_VERSIONS } from "@/domain/limits";
 import { closeDb, getDb } from "@/server/db/client";
-import { account, session, user } from "@/server/db/schema";
+import { account, profile, session, usageDaily, user } from "@/server/db/schema";
 import { importExport } from "@/server/services/imports";
 import { createProfile, setProfileStatus } from "@/server/services/profiles";
+import { GLOBAL_SCOPE, utcDay } from "@/server/services/usage";
 
 import { callRoute, createVerifiedUser, resetDatabase, restoreTestEnv, setTestEnv } from "../../helpers";
 import { ATLAS, exportPayload, NOVA, OWNER } from "../services/support";
@@ -324,6 +325,27 @@ describe("/settings", () => {
     // 23:00 in Tokyo is 14:00 UTC.
     expect(after.profiles[0]!.nextReviewAt).toMatch(/T14:00:00\.000Z$/);
     expect(after.profiles[1]!.nextReviewAt).toBeNull();
+  });
+
+  it("says when a review is overdue, and when scheduled reviews are paused and why", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, timezone: "UTC", onboarded: true });
+    const created = await createProfile(atlas.userId, "atlas_studio");
+    await getDb()
+      .update(profile)
+      .set({ nextReviewAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(profile.id, created.id));
+    visitAs(atlas.cookie);
+
+    const overdue = renderToStaticMarkup(await settingsScreen());
+    expect(overdue).toContain("Overdue since");
+    expect(overdue).not.toContain("Scheduled reviews are paused");
+
+    setTestEnv({ CAPACITY_MAX_JOBS_PER_DAY: "1" });
+    await getDb().insert(usageDaily).values({ day: utcDay(new Date()), scopeKey: GLOBAL_SCOPE, jobs: 1 });
+    const paused = renderToStaticMarkup(await settingsScreen());
+    expect(paused).toContain("Scheduled reviews are paused");
+    expect(paused).toContain("The service reached its daily job capacity.");
+    expect(paused).toContain("Paused until");
   });
 
   it("sends a visitor who is not signed in to sign-in, remembering the page", async () => {

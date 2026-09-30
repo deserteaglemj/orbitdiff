@@ -156,6 +156,46 @@ describe("listActivity: import wording", () => {
     expect(entry.detail).toBe("No differences were observed in your export between 1 Sep 2026 and 8 Sep 2026.");
   });
 
+  it("says nothing could be compared when no list was complete where a comparison needs it", async () => {
+    const { userId, profileId } = await atlasProfile();
+    const partial = { completeFollowers: false, completeFollowing: false };
+    await importExport(userId, profileId, exportPayload({ ...partial, followers: ["nova_labs", "pixel_forge"] }), NOW);
+    await importExport(userId, profileId, { ...SECOND, ...partial }, NOW);
+    await markDerived(profileId);
+    const entry = await only(userId, "import_processed");
+    expect(entry.title).toBe("Nothing could be compared");
+    expect(entry.title).not.toContain("No differences");
+    expect(entry.detail).toBe(
+      "Nothing could be compared between 1 Sep 2026 and 8 Sep 2026. An addition is checked only when the earlier " +
+        "export's list is complete, and a removal only when the later export's list is complete. Neither was, so " +
+        "whether anything differs is unknown.",
+    );
+  });
+
+  it("names what was compared when only part of the lists could be compared", async () => {
+    const { userId, profileId } = await atlasProfile();
+    // Followers complete in the earlier export only: additions to followers can be checked, nothing else.
+    await importExport(userId, profileId, exportPayload({ completeFollowing: false }), NOW);
+    await importExport(userId, profileId, { ...SECOND, completeFollowers: false, completeFollowing: false }, NOW);
+    await markDerived(profileId);
+    const entry = await only(userId, "import_processed");
+    expect(entry.title).toBe("No differences observed");
+    expect(entry.detail).toBe(
+      "No differences were observed in your export between 1 Sep 2026 and 8 Sep 2026 in what could be compared: " +
+        "additions to followers. The rest could not be compared, so whether it differs is unknown.",
+    );
+  });
+
+  it("does not claim no difference for an entry that does not say what could be compared", async () => {
+    const { userId, profileId } = await atlasProfile();
+    await importExport(userId, profileId, exportPayload(), NOW);
+    await importExport(userId, profileId, SECOND, NOW);
+    await markDerived(profileId, { processed: { comparison: undefined } });
+    const entry = await only(userId, "import_processed");
+    expect(entry.title).toBe("No export observations");
+    expect(entry.detail).toBe("No export observation was recorded between 1 Sep 2026 and 8 Sep 2026.");
+  });
+
   it("says nothing can be compared while no import has a capture time", async () => {
     const { userId, profileId } = await atlasProfile();
     await importExport(userId, profileId, exportPayload({ capturedAt: null }), NOW);

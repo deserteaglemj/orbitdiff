@@ -5,6 +5,7 @@ import type { PageQuery } from "@/components/dashboard/query";
 import { ProfileScreen } from "@/components/profile/profile-screen";
 import { type ProfileTab, readTab } from "@/components/profile/rows";
 import { Skeleton } from "@/components/ui";
+import { readScheduleState } from "@/server/jobs/capacity";
 import { listActivity } from "@/server/services/activity";
 
 import { loadOwnedProfile } from "./load";
@@ -52,7 +53,10 @@ export default async function ProfilePage({
   const { user, profile, now } = owned;
   const query = await searchParams;
   const tab = readTab(query.tab);
-  const processed = await listActivity(user.id, { profileId: profile.id, kind: "import_processed", pageSize: 1 });
+  const [processed, schedule] = await Promise.all([
+    listActivity(user.id, { profileId: profile.id, kind: "import_processed", pageSize: 1 }),
+    readScheduleState(now),
+  ]);
   const Section = LOADERS[tab];
 
   return (
@@ -62,6 +66,7 @@ export default async function ProfilePage({
       lastProcessedAt={processed.data[0]?.occurredAt ?? null}
       tab={tab}
       now={now}
+      schedule={schedule}
     >
       <Suspense key={JSON.stringify([tab, query])} fallback={<Skeleton label="Loading this section" lines={6} />}>
         <Section userId={user.id} profile={profile} query={query} timeZone={user.timezone} />
