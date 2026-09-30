@@ -19,7 +19,8 @@ OrbitDiff Web sits beside the local product. The Python package, the OrbitDiff A
 
 - Next.js 16 App Router in `web/`, TypeScript strict, React server components for reads, JSON route handlers under `/api` for every mutation.
 - Postgres through Drizzle ORM and the `pg` driver in every environment.
-- Better Auth: email and password, email verification required, password reset, database sessions in secure httpOnly cookies, database-backed rate limiting. No OAuth, no admin plugin, no email change.
+- Better Auth: email and password, email verification required, password reset, database sessions in secure httpOnly cookies, database-backed rate limiting per client and per target address. No OAuth, no admin plugin, no email change.
+- Verification is bound to the password: opening the mailed link only leaves a signed, one hour proof in that browser. The address becomes verified at the first sign-in from that browser with the pending account's current password. The link alone verifies nothing and signs nobody in. Registering an unverified address again replaces the pending account, so a password set by someone without the mailbox never survives.
 - Durable jobs: a `job` table drained by `POST /api/jobs/tick`. The tick is called hourly by the GitHub Actions workflow `.github/workflows/orbitdiff-web-jobs.yml` and opportunistically right after an import. A Vercel cron is not the scheduler.
 - Exports are parsed in the browser. Only recognized follower and following usernames, shard numbers, the capture time, and the completeness declarations are sent. The server stores no uploaded files.
 - No LLM, scraper, or paid dependency.
@@ -40,6 +41,8 @@ web/
     export/files.ts              member path safety, recognized names, shard and root rules
     export/rows.ts               relationship row extraction
     export/zip.ts                bounded ZIP reading
+    export/inflate.ts            raw DEFLATE decoding with zlib's acceptance rules
+    export/json.ts, urlsplit.ts  strict JSON reading and a hand port of urlsplit
     export/snapshot.ts           identities, coverage, store decision, view, export events
     following/reconcile.ts       port of diff.py plus collection validation (fixture-tested only)
     schedule.ts                  timezone-aware next review time
@@ -52,7 +55,7 @@ web/
     mail/                        transport.ts (capture, none)
     services/                    tenant-scoped data access; userId is always the first argument
     jobs/                        queue.ts, tick.ts, handlers.ts
-  tests/unit, tests/parity, tests/integration, tests/e2e, tests/setup
+  tests/unit, tests/parity, tests/integration, tests/helpers, tests/setup
 ```
 
 ### Repository guard rails for `web/` and `docs/web/`
@@ -172,6 +175,7 @@ All values live in `web/src/domain/limits.ts`. When a limit is reached the actio
 
 - `requireUser()`: valid session, verified email, `status = 'active'`. `requireOnboardedUser()` additionally requires recorded terms and privacy consent and `onboarded_at`.
 - Every service function takes `userId` first and filters by it. A missing id and another tenant's id both return `not_found` (HTTP 404).
+- A suspended account cannot create a session or use any account endpoint except reading its state and signing out, and cannot delete itself.
 - Admin: `requireAdmin()` passes only when the session user's verified, lowercased email is in `ADMIN_EMAILS`. No database column, request field, or signup order grants admin. Everyone else gets 404 on `/admin` and `/api/admin/*`.
 - State-changing routes require a same-origin `Origin` header.
 - Request bodies are parsed with strict schemas; unknown keys are rejected.
@@ -184,7 +188,7 @@ Errors are `{ "error": { "code", "message", "details"? } }`. Codes and statuses:
 | Route | Purpose |
 | --- | --- |
 | `GET /api/health` | Public. Stage, commit, database reachability, mail delivery mode, registration state, last tick. No secrets. |
-| `/api/auth/*` | Better Auth. Sign-up is gated by capacity, the optional access code, and consent. |
+| `/api/auth/*` | Better Auth, limited to sign-up, sign-in, sign-out, session, email verification, password reset and change, update of name and timezone, account deletion with the password, and session listing and revocation. Bodies up to 16 KiB. Redirect targets are site paths. Refusals from inside Better Auth use its own `{ code, message }` body. Sign-up is gated, in order, by the operator name, mail delivery, capacity, the optional access code, and consent. |
 | `GET, PATCH /api/me` | Profile of the signed-in user; PATCH accepts `name`, `timezone`, `reviewHour`. |
 | `POST /api/me/consent` | Record a marketing consent change. |
 | `POST /api/me/onboarding` | Record terms and privacy consent and mark onboarding complete. |
@@ -197,8 +201,7 @@ Errors are `{ "error": { "code", "message", "details"? } }`. Codes and statuses:
 | `GET /api/profiles/:id/counts` | Count history. |
 | `POST /api/profiles/:id/review` | Queue a manual review. |
 | `GET /api/activity` | Activity feed with `profileId`, `kind`, `status`, `q`, `page`, `pageSize`. |
-| `GET /api/account/export` | Download everything stored for the user as JSON. |
-| `POST /api/account/delete` | Delete the account and all its data (password required). |
+| `GET /api/account/export` | Download everything stored for the user as JSON. Account deletion is Better Auth's delete-user endpoint, which always requires the password and removes every row of the user. |
 | `GET /api/admin/users`, `GET /api/admin/capacity` | Admin only. |
 | `POST /api/jobs/tick` | Protected batch endpoint. |
 | `GET /api/staging/mailbox` | Captured mail for an address. Only when mail is captured; needs `MAILBOX_SECRET`. |
@@ -217,12 +220,15 @@ The server re-validates every invariant (handle rule, sorted unique lists, shard
 
 ## 9. Screens
 
-Landing, sign up, sign in, verify email, forgot and reset password, onboarding, dashboard, profile detail and history, settings, admin, privacy, terms. Every visible control works. Each data view has loading, empty, stale, failed, paused, and processing states. The dashboard and profile pages carry the notice that automatic identity tracking is unavailable. Layout works from 360 px wide to desktop and meets WCAG AA for contrast, labels, focus order, and live regions.
+Landing, sign up, sign in, verify email, forgot and reset password, onboarding, dashboard, profile detail and history, settings, admin, privacy, terms. Every visible control works. Each data view has loading, empty, stale, failed, paused, and processing states. The dashboard and profile pages carry the notice that automatic identity tracking is unavailable. Layout works from 360 px wide to desktop and meets WCAG AA for contrast, labels, focus order, and live regions. The customer journey is checked in a real browser; there is no separate browser test suite.
 
 ## 10. Configuration
 
-`APP_STAGE` (`development`, `test`, `staging`, `production`), `APP_BASE_URL`, `APP_COMMIT_SHA`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `BETTER_AUTH_SECRET`, `JOBS_TICK_SECRET`, `ADMIN_EMAILS`, `EMAIL_TRANSPORT` (`capture`, `none`), `MAILBOX_SECRET`, `SIGNUP_ACCESS_CODE`, `CAPACITY_MAX_USERS`, `CAPACITY_MAX_JOBS_PER_DAY`, `CAPACITY_MAX_DB_BYTES`.
+`APP_STAGE` (`development`, `test`, `staging`, `production`; required, no default), `APP_BASE_URL` (https for staging and production), `APP_COMMIT_SHA`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `BETTER_AUTH_SECRET`, `JOBS_TICK_SECRET`, `ADMIN_EMAILS`, `OPERATOR_NAME`, `EMAIL_TRANSPORT` (`capture`, `none`), `MAILBOX_SECRET`, `SIGNUP_ACCESS_CODE`, `CAPACITY_MAX_USERS`, `CAPACITY_MAX_JOBS_PER_DAY`, `CAPACITY_MAX_DB_BYTES`, `CLIENT_IP_HEADER` (default `x-forwarded-for`), `TRUSTED_PROXIES`.
 
 - Configuration is validated lazily so `next build` needs no runtime secrets.
 - `EMAIL_TRANSPORT=capture` is refused when `APP_STAGE=production`. With `EMAIL_TRANSPORT=none` registration is closed and the interface says why.
 - Sending real mail is not implemented. It needs a domain the operator controls.
+- Registration is closed until `OPERATOR_NAME` names who runs the service. The legal pages show that name.
+- The per-client rate limit trusts `CLIENT_IP_HEADER`. The hosting platform must set and overwrite that header (Vercel does for `x-forwarded-for`). On any other host, set it to the header that host overwrites.
+- With no database configured, the deployment serves public pages only, the health endpoint answers `unconfigured`, and registration is closed.
