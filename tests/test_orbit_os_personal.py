@@ -162,6 +162,20 @@ def test_zip_file_source_matches_uploaded_zip(tmp_path: Path) -> None:
     assert one["accounts"] == two["accounts"]
 
 
+def test_corrupt_deflate_preserves_the_saved_personal_state(
+    tmp_path: Path, corrupt_deflate_zip: bytes,
+) -> None:
+    do_import(tmp_path, files("nova_labs"), captured_at=stamp(1))
+    saved = tmp_path / "personal" / "snapshots.json"
+    before = saved.read_bytes()
+
+    with pytest.raises(ValueError, match="ZIP.*safely"):
+        do_import(tmp_path, {"export.zip": corrupt_deflate_zip}, captured_at=stamp())
+
+    assert saved.read_bytes() == before
+    assert load_personal(tmp_path)["metrics"]["followers_observed"] == 1
+
+
 @pytest.mark.parametrize("names", [("followers_2.json",), ("followers_1.json", "followers_3.json")])
 def test_missing_shards_cannot_be_declared_complete(tmp_path: Path, names: tuple[str, ...]) -> None:
     payload = {name: roster("nova_labs") for name in names}

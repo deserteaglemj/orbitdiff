@@ -16,6 +16,7 @@ import stat
 import struct
 import uuid
 import zipfile
+import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -192,7 +193,7 @@ def _zip_files(payload: bytes) -> dict[str, bytes]:
                 if len(content) > MAX_FILE_BYTES or len(content) != member.file_size:
                     raise ValueError("The decompressed member exceeds its size limit.")
                 result[str(path)] = content
-    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as error:
+    except (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError, EOFError) as error:
         raise ValueError("The export ZIP could not be read safely.") from error
     return result
 

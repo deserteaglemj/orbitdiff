@@ -67,6 +67,34 @@ def test_uploaded_content_imports_without_exposing_arbitrary_paths(portable: Orb
     assert call(portable, "/api/import", {"path": "private.json"}, authorized(portable))[0] == 400
 
 
+def test_corrupt_deflate_returns_http_400_and_releases_the_import_control(
+    portable: OrbitServer, corrupt_deflate_zip: bytes,
+) -> None:
+    headers = authorized(portable)
+    content = json.dumps([{"string_list_data": [{"value": "nova_labs"}]}]).encode()
+    seed = {"account": "atlas_studio", "captured_at": "2026-09-29T12:00:00Z",
+            "files": [{"name": "followers_1.json", "content": base64.b64encode(content).decode()}]}
+    assert call(portable, "/api/import", seed, headers)[0] == 200
+    saved = portable.workspace / "personal" / "snapshots.json"
+    before = saved.read_bytes()
+    corrupt = {"account": "atlas_studio",
+               "files": [{"name": "export.zip", "content": base64.b64encode(corrupt_deflate_zip).decode()}]}
+
+    status, rejected = call(portable, "/api/import", corrupt, headers)
+
+    assert status == 400
+    assert set(rejected) == {"error"}
+    assert "zlib" not in rejected["error"] and "Traceback" not in rejected["error"]
+    assert saved.read_bytes() == before
+
+    replacement = json.dumps([{"string_list_data": [{"value": "pixel_forge"}]}]).encode()
+    valid = {"account": "atlas_studio", "captured_at": "2026-09-29T13:00:00Z",
+             "files": [{"name": "followers_1.json", "content": base64.b64encode(replacement).decode()}]}
+    assert call(portable, "/api/import", valid, headers)[0] == 200
+    _, state = call(portable, "/api/state")
+    assert [account["username"] for account in state["personal"]["accounts"]] == ["pixel_forge"]
+
+
 def test_demo_never_changes_the_live_workspace(portable: OrbitServer) -> None:
     status, demo = call(portable, "/api/demo")
     assert status == 200

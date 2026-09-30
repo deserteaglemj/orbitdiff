@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import string
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -59,14 +60,18 @@ def render_json(target: str, events: Iterable[Event]) -> str:
 
 
 def _markdown_text(value: str) -> str:
-    return (
-        "".join(character for character in value if character >= " " and character != "\x7f")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("|", "\\|")
-        .replace("`", "\\`")
-    )
+    entities = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
+    parts = []
+    for character in value:
+        if character < " " or character == "\x7f":
+            continue
+        if character in entities:
+            parts.append(entities[character])
+        elif character in string.punctuation:
+            parts.append("\\" + character)
+        else:
+            parts.append(character)
+    return "".join(parts)
 
 
 def render_markdown(target: str, events: Iterable[Event]) -> str:
@@ -82,6 +87,6 @@ def render_markdown(target: str, events: Iterable[Event]) -> str:
     )
     for event in rows:
         lines.append(
-            f"| {_markdown_text(event.event_type)} | {_markdown_text(event.username)} (`{_markdown_text(event.actor_id)}`) | {_markdown_text(event.first_seen_at)} | {_markdown_text(event.confirmed_at)} | {event.run_id} |"
+            f"| {_markdown_text(event.event_type)} | {_markdown_text(event.username)} ({_markdown_text(event.actor_id)}) | {_markdown_text(event.first_seen_at)} | {_markdown_text(event.confirmed_at)} | {_markdown_text(str(event.run_id))} |"
         )
     return "\n".join([*lines, ""])

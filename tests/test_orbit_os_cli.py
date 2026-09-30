@@ -92,6 +92,28 @@ def test_doctor_reports_corrupt_personal_state_as_not_ready(tmp_path: Path) -> N
     assert any(item["code"] == "personal_unreadable" for item in payload["issues"])
 
 
+def test_corrupt_deflate_import_returns_a_safe_cli_error_without_changing_state(
+    tmp_path: Path, corrupt_deflate_zip: bytes,
+) -> None:
+    source = tmp_path / "followers_1.json"
+    source.write_text(json.dumps([{"string_list_data": [{"value": "nova_labs"}]}]))
+    workspace = tmp_path / "workspace"
+    seed = run_cli("import", str(source), "--account", "atlas_studio", "--workspace", str(workspace))
+    assert seed.returncode == 0, seed.stderr
+    saved = workspace / "personal" / "snapshots.json"
+    before = saved.read_bytes()
+    archive = tmp_path / "export.zip"
+    archive.write_bytes(corrupt_deflate_zip)
+
+    result = run_cli("import", str(archive), "--account", "atlas_studio", "--workspace", str(workspace))
+
+    assert result.returncode == 2, result.stderr
+    assert "ZIP" in result.stderr and "safely" in result.stderr
+    assert "Traceback" not in result.stderr and "zlib" not in result.stderr
+    assert result.stdout == ""
+    assert saved.read_bytes() == before
+
+
 def test_workspace_rejects_case_variant_protected_paths_before_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
