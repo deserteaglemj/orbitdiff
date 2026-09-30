@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a focused improvement within OrbitDiff's public-only scope
+description: Propose a focused improvement within OrbitDiff's local-first personal-export and public-watchlist scope
 title: "feature: "
 labels: [enhancement]
 body:
