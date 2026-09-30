@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import stat
+from dataclasses import replace
+
+import pytest
 
 from orbitdiff import reports
 from orbitdiff.models import Event
@@ -34,6 +37,35 @@ def test_markdown_report_escapes_html_pipes_and_control_characters() -> None:
 
     assert "&lt;bad\\|name&gt;" in report
     assert "\x00" not in report
+
+
+@pytest.mark.parametrize("field", [
+    "target", "username", "actor_id", "event_type", "first_seen_at", "confirmed_at", "run_id",
+])
+def test_markdown_report_fields_are_plain_text(field: str) -> None:
+    value = r"![nova_labs](https://example.invalid/pixel.png) [note](https://example.invalid) \ `code` *label* ~old~ | <tag>&"
+    escaped = r"\!\[nova\_labs\]\(https\:\/\/example\.invalid\/pixel\.png\) \[note\]\(https\:\/\/example\.invalid\) \\ \`code\` \*label\* \~old\~ \| &lt;tag&gt;&amp;"
+    event = unsafe_event()
+    report = render_markdown(value if field == "target" else "atlas_studio", [
+        event if field == "target" else replace(event, **{field: value}),
+    ])
+
+    if field == "target":
+        assert report.splitlines()[0] == f"# OrbitDiff report: {escaped}"
+    elif field == "actor_id":
+        assert f"({escaped})" in report
+    else:
+        assert escaped in report
+    assert "![nova_labs](" not in report
+    assert "[note](" not in report
+
+
+def test_markdown_report_backslashes_cannot_cancel_link_escaping() -> None:
+    event = replace(unsafe_event(), username=r"\![pixel_forge](https://example.invalid)")
+
+    report = render_markdown("atlas_studio", [event])
+
+    assert r"\\\!\[pixel\_forge\]\(https\:\/\/example\.invalid\)" in report
 
 
 def test_write_report_uses_private_directory_and_atomic_private_file(tmp_path) -> None:
