@@ -262,6 +262,8 @@ class GraphStore:
                             VALUES (?, ?, 1)""",
                             (collection.target, account.profile_id),
                         )
+                    self._on_live_result(connection, collection.target, attempted_at,
+                                         "success", None, collection.collected_at)
                     connection.commit()
                     return []
 
@@ -283,6 +285,8 @@ class GraphStore:
                     )
                     if event is not None:
                         events.append(event)
+                self._on_live_result(connection, collection.target, attempted_at,
+                                     "success", None, collection.collected_at)
                 connection.commit()
                 return events
             except BaseException:
@@ -378,17 +382,25 @@ class GraphStore:
             raise StaleAttemptError("a newer live attempt owns this target")
 
     def record_failed_run(self, target: str, error: str, *, baseline_run: bool = False,
-                          attempted_at: datetime | None = None, now: datetime | None = None) -> None:
+                          attempted_at: datetime | None = None, now: datetime | None = None,
+                          reason: str | None = None) -> None:
         self.initialize()
+        finished = now or datetime.now(UTC)
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._check_attempt(connection, target, attempted_at)
             connection.execute(
                 """INSERT INTO runs(target, state, run_kind, collected_at, error)
                 VALUES (?, 'failed', ?, ?, ?)""",
-                (target, "baseline" if baseline_run else "scan", (now or datetime.now(UTC)).isoformat(), error),
+                (target, "baseline" if baseline_run else "scan", finished.isoformat(), error),
             )
+            self._on_live_result(connection, target, attempted_at, "failed", reason or "provider_failed", finished)
             connection.commit()
+
+    def _on_live_result(self, connection: sqlite3.Connection, target: str,
+                        attempted_at: datetime | None, state: str, reason: str | None,
+                        now: datetime) -> None:
+        """Extension point for state committed with a fenced live result."""
 
     @staticmethod
     def _target_status(connection: sqlite3.Connection | None, target: str) -> dict[str, Any]:

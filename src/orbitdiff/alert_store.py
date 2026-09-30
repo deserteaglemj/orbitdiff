@@ -231,11 +231,33 @@ class AlertStore(GraphStore):
         with self._connection() as conn:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute("SELECT * FROM alert_windows WHERE id=?", (window_id,)).fetchone()
-                if row is None or row["state"] != "running":
-                    return
-                conn.execute("UPDATE alert_windows SET state=?,reason=?,finished_at=? WHERE id=?",
-                             (state, reason, aware(now).isoformat(), window_id))
-                if block:
-                    conn.execute("UPDATE alert_jobs SET state='blocked',blocked_reason=? WHERE id=? AND state='enabled'",
-                                 (reason, row["job_id"]))
+                self._finish_window(conn, window_id, state=state, reason=reason, now=now, block=block)
+
+    def _finish_window(self, conn: sqlite3.Connection, window_id: str, *, state: str,
+                       reason: str | None, now: datetime, block: bool) -> None:
+        row = conn.execute("SELECT * FROM alert_windows WHERE id=?", (window_id,)).fetchone()
+        if row is None or row["state"] != "running":
+            return
+        conn.execute("UPDATE alert_windows SET state=?,reason=?,finished_at=? WHERE id=?",
+                     (state, reason, aware(now).isoformat(), window_id))
+        if block:
+            conn.execute("UPDATE alert_jobs SET state='blocked',blocked_reason=? WHERE id=? AND state='enabled'",
+                         (reason, row["job_id"]))
+        self._on_window_finished(conn, dict(row), state, aware(now))
+
+    def _on_live_result(self, connection: sqlite3.Connection, target: str,
+                        attempted_at: datetime | None, state: str, reason: str | None,
+                        now: datetime) -> None:
+        if attempted_at is None:
+            return
+        # A window and its reserved attempt share an exact UTC admission instant.
+        # Manual calls use GraphStore; skipped reservations never reach this hook.
+        row = connection.execute("""SELECT w.id FROM alert_windows w JOIN alert_jobs j ON j.id=w.job_id
+            WHERE j.target=? AND w.claimed_at=? AND w.state='running'""",
+            (target, aware(attempted_at).isoformat())).fetchone()
+        if row is not None:
+            self._finish_window(connection, row[0], state=state, reason=reason, now=now, block=state == "failed")
+
+    def _on_window_finished(self, conn: sqlite3.Connection, window: dict[str, Any],
+                            state: str, now: datetime) -> None:
+        """Extension point for notices committed with a terminal run state."""

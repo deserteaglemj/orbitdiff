@@ -47,7 +47,7 @@ The installer comparison explicitly permits only its five observed `github-*` tr
 
 Host results are recorded for specific versions, platforms, and installation routes. A folder copy establishes file installation only. A command smoke test establishes runtime execution only. Fresh workflow evidence needs an actual new host session that selects the installed skill, reads its references, invokes the retained installed executable, and produces a response supported by command receipts.
 
-Verified on 2026-09-30, Apple Silicon macOS 26.6.2:
+Historical v0.2.2 release and prior 0.2.2 candidate placement checks, recorded on 2026-09-30, Apple Silicon macOS 26.6.2. These rows do not establish discovery or execution of the newer 0.2.3 daily-alert skill:
 
 | Host | File placement and references | Host discovery | Fresh skill workflow | Runtime executed by host | Remaining prerequisite |
 | --- | --- | --- | --- | --- | --- |

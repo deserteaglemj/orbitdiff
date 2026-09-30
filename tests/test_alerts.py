@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from orbitdiff.alert_delivery import DeliveryResult
 from orbitdiff.alert_outbox import OutboxStore
 from orbitdiff.models import Account, Collection
@@ -108,3 +110,76 @@ def test_runtime_mismatch_stops_before_provider_creation(tmp_path):
     assert result['outcome'] == 'blocked'
     assert result['reason'] == 'runtime_mismatch'
     assert store.jobs()[0]['runs'] == []
+
+
+def test_delivery_lease_starts_after_slow_collection_finishes(tmp_path, monkeypatch):
+    from orbitdiff.alerts import run_job
+
+    store, ident = job(tmp_path)
+    elapsed = [0.0]
+    monkeypatch.setattr('time.monotonic', lambda: elapsed[0])
+    store.status_notice(ident, identity='synthetic', payload='Synthetic status', now=NOW)
+
+    class SlowProvider:
+        def collect(self, target):
+            elapsed[0] += 180
+            return Collection(target, 0, (), True, NOW+timedelta(hours=1, minutes=3))
+
+    run_job(store, ident, now=NOW+timedelta(hours=1), provider_factory=SlowProvider, sender=RecordingSender())
+    assert store.delivery_attempts(ident)[0]['started_at'] == '2026-10-01T09:03:00+00:00'
+    assert store.jobs()[0]['runs'][0]['finished_at'] == '2026-10-01T09:03:00+00:00'
+
+
+def test_committed_blocking_window_already_has_durable_notice(tmp_path):
+    store, ident = job(tmp_path)
+    now = NOW+timedelta(hours=1)
+    window = store.claim_window(ident, now=now)
+    store.finish_window(window['id'], state='failed', reason='provider_failed', now=now, block=True)
+    restarted = OutboxStore(store.path)
+    assert restarted.job(ident)['state'] == 'blocked'
+    assert len(restarted.notices(ident)) == 1
+    assert 'could not complete' in restarted.notices(ident)[0]['payload']
+
+
+def test_notice_failure_rolls_back_window_transition(tmp_path, monkeypatch):
+    store, ident = job(tmp_path)
+    now = NOW+timedelta(hours=1)
+    window = store.claim_window(ident, now=now)
+
+    def interrupted(*args, **kwargs):
+        raise OSError('synthetic interruption')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, '_insert_notice', interrupted)
+        with pytest.raises(OSError):
+            store.finish_window(window['id'], state='failed', reason='provider_failed', now=now, block=True)
+    assert store.job(ident)['state'] == 'enabled'
+    assert store.jobs()[0]['runs'][0]['state'] == 'running'
+    store.finish_window(window['id'], state='failed', reason='provider_failed', now=now, block=True)
+    assert len(store.notices(ident)) == 1
+
+
+def test_committed_auth_failure_blocks_even_if_orchestration_crashes(tmp_path, monkeypatch):
+    from orbitdiff.alerts import run_job
+    from orbitdiff.providers.base import SessionUnavailableError
+
+    store, ident = job(tmp_path)
+    calls = []
+
+    class Rejected:
+        def collect(self, target):
+            calls.append(target)
+            raise SessionUnavailableError('synthetic rejected session')
+
+    def interrupted(*args, **kwargs):
+        raise OSError('crash after persisted collection result')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, 'finish_window', interrupted)
+        with pytest.raises(OSError):
+            run_job(store, ident, now=NOW+timedelta(hours=1), provider_factory=Rejected, sender=RecordingSender())
+    restarted = OutboxStore(store.path)
+    assert restarted.job(ident)['state'] == 'blocked'
+    run_job(restarted, ident, now=NOW+timedelta(days=1, hours=1), provider_factory=Rejected, sender=RecordingSender())
+    assert len(calls) == 1
+    assert len(restarted.notices(ident)) == 1

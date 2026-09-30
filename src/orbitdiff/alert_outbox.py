@@ -73,6 +73,29 @@ class OutboxStore(AlertStore):
             VALUES (?,?,'macos','current-user',1,?,?)""",
             (uuid.uuid4().hex, job["id"], cutoff, now.isoformat()))
 
+    def _on_window_finished(self, conn: sqlite3.Connection, window: dict[str, Any],
+                            state: str, now: datetime) -> None:
+        job = self._job(conn, window["job_id"])
+        if state == "failed":
+            complete = self._target_status(conn, job["target"])["last_success_at"] or "unknown"
+            identity = f"blocked:{window['id']}"
+            payload = (f"OrbitDiff could not complete the check for {job['target']}. "
+                       f"Last complete observation: {complete}. No conclusion about new follows is available. "
+                       "Automatic collection is blocked. Open alert status for the next step.")
+        elif state == "success":
+            previous = conn.execute("""SELECT state FROM alert_windows WHERE job_id=? AND id!=?
+                AND state IN ('success','failed') ORDER BY due_at DESC LIMIT 1""",
+                (job["id"], window["id"])).fetchone()
+            if previous is None or previous[0] != "failed":
+                return
+            identity = f"recovered:{window['id']}"
+            payload = (f"OrbitDiff completed a new observation for {job['target']}. "
+                       "Collection has recovered; earlier gaps remain in the history.")
+        else:
+            return
+        for sub in conn.execute("SELECT id FROM alert_subscriptions WHERE job_id=? AND active=1", (job["id"],)).fetchall():
+            self._insert_notice(conn, sub[0], payload, "status", now, identity=identity)
+
     @staticmethod
     def _insert_notice(conn: sqlite3.Connection, sub_id: str, payload: str,
                        kind: str, now: datetime, *, identity: str | None = None) -> str:

@@ -1,6 +1,7 @@
 """One bounded live attempt shared by manual and scheduled entry points."""
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -42,6 +43,7 @@ def collect_live(store: GraphStore, target: str, provider_factory: Callable[[], 
                  *, now: datetime, baseline: bool = False,
                  cooldown: timedelta = timedelta(minutes=30)) -> LiveResult:
     current = aware(now)
+    started = time.monotonic()
     target = normalize_target(target)
     if not store.reserve_live_attempt(target, now=current, cooldown=cooldown):
         return LiveResult("skipped", "cooldown")
@@ -63,7 +65,8 @@ def collect_live(store: GraphStore, target: str, provider_factory: Callable[[], 
                   "incomplete" if isinstance(error, CollectionIncompleteError) else "provider_failed")
         try:
             store.record_failed_run(target, MESSAGES[reason], baseline_run=baseline,
-                                    attempted_at=current, now=current)
+                                    attempted_at=current, reason=reason,
+                                    now=current + timedelta(seconds=time.monotonic()-started))
         except StaleAttemptError:
             return LiveResult("skipped", "stale_attempt")
         return LiveResult("failed", reason)
