@@ -1,0 +1,62 @@
+{
+  "name": "orbitdiff-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "parity:check": "node scripts/parity-check.mjs"
+  },
+  "dependencies": {
+    "better-auth": "1.7.6",
+    "drizzle-orm": "0.45.3",
+    "fflate": "0.8.3",
+    "next": "16.3.7",
+    "pg": "8.23.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "0.0.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "^4",
+    "@testcontainers/postgresql": "12.2.0",
+    "@types/node": "^22",
+    "@types/pg": "8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "0.31.11",
+    "embedded-postgres": "18.4.0-beta.17",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.7",
+    "tailwindcss": "^4",
+    "tsx": "4.23.15",
+    "typescript": "^5",
+    "vite": "^8",
+    "vitest": "5.0.2"
+  },
+  "packageManager": "yarn@4.18.1",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependenciesMeta": {
+    "@embedded-postgres/darwin-arm64": {
+      "built": true
+    },
+    "@embedded-postgres/linux-x64": {
+      "built": true
+    }
+  },
+  "type": "module"
+}
