@@ -65,7 +65,11 @@ describe("runTick: daily reviews", () => {
   });
 
   it("keys the review by the local date in the user's timezone", async () => {
-    const owner = await dueOwner("atlas@orbitdiff.test", "atlas_studio", "Pacific/Auckland");
+    // Due at 11:30 UTC on the 30th, which is 00:30 on the 1st in Auckland.
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio", {
+      timezone: "Pacific/Auckland",
+      profile: { nextReviewAt: new Date("2026-09-30T11:30:00.000Z") },
+    });
 
     await runTick({ now: NOW });
 
@@ -74,6 +78,16 @@ describe("runTick: daily reviews", () => {
     expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe(
       nextReviewAt(NOW, "Pacific/Auckland", 9).toISOString(),
     );
+  });
+
+  it("keys the review by the date it was scheduled for, not the date of the run", async () => {
+    // Due at 09:00 UTC, 22:00 on the 30th in Auckland. The run at 12:00 UTC is already the 1st there.
+    const owner = await dueOwner("atlas@orbitdiff.test", "atlas_studio", "Pacific/Auckland");
+
+    await runTick({ now: NOW });
+
+    const [review] = await jobsOf(owner.profileId, "daily_review");
+    expect(review?.dedupeKey).toBe(`daily:${owner.profileId}:2026-09-30`);
   });
 
   it("does nothing for a profile whose review time has not come", async () => {
@@ -454,6 +468,41 @@ describe("runTick: concurrency", () => {
   });
 });
 
+describe("runTick: capacity under overlap", () => {
+  it("keeps two overlapping ticks together inside the day's job capacity", async () => {
+    setTestEnv({ CAPACITY_MAX_JOBS_PER_DAY: "3" });
+    const owner = await createVerifiedUser({ email: "atlas@orbitdiff.test", onboarded: true });
+    for (let index = 0; index < 8; index += 1) {
+      const handle = `atlas_studio_${index}`;
+      const target: Owner = { userId: owner.userId, cookie: owner.cookie, handle, profileId: await addProfile(owner.userId, handle) };
+      await addSnapshot(target, { capturedAt: "2026-09-01T12:00:00+00:00", followers: ["lunar_arch"], following: [] });
+      await queueDerive(target, NOW);
+    }
+
+    const [left, right] = await Promise.all([runTick({ now: NOW }), runTick({ now: NOW })]);
+
+    expect(left.claimed + right.claimed).toBe(3);
+    expect(left.succeeded + right.succeeded).toBe(3);
+    const [usage] = await getDb().select().from(usageDaily).where(eq(usageDaily.scopeKey, "global"));
+    expect(usage?.jobs).toBe(3);
+    expect(await stateOf(JOB_CAPACITY_STATE_KEY)).toMatchObject({ used: 3, limit: 3, paused: true });
+  });
+
+  it("drains nothing from a queue that was filled while the day's capacity ran out", async () => {
+    setTestEnv({ CAPACITY_MAX_JOBS_PER_DAY: "2" });
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    await addSnapshot(owner, { capturedAt: "2026-09-01T12:00:00+00:00", followers: ["nova_labs"], following: [] });
+    const waiting = await queueDerive(owner, NOW);
+    await getDb().insert(usageDaily).values({ day: "2026-09-30", scopeKey: "global", jobs: 2 });
+
+    // The opportunistic drain does not read the capacity first: the claim itself must refuse.
+    const drained = await drainJobs({ now: NOW, limit: 5 });
+
+    expect(drained).toEqual({ claimed: 0, succeeded: 0, failed: 0, retried: 0, cancelled: 0 });
+    expect((await jobRow(waiting.id))?.status).toBe("queued");
+  });
+});
+
 describe("drainJobs", () => {
   it("runs only the jobs of the named profile", async () => {
     const owner = await createVerifiedUser({ email: "atlas@orbitdiff.test", onboarded: true });
@@ -469,6 +518,26 @@ describe("drainJobs", () => {
     expect(drained).toEqual({ claimed: 1, succeeded: 1, failed: 0, retried: 0, cancelled: 0 });
     expect((await jobsOf(first.profileId))[0]?.status).toBe("queued");
     expect((await jobsOf(second.profileId))[0]?.status).toBe("succeeded");
+  });
+
+  it("runs only the named kinds, leaving an older job of another kind queued", async () => {
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    const { job: review } = await enqueueJob(getDb(), {
+      userId: owner.userId,
+      profileId: owner.profileId,
+      kind: "manual_review",
+      dedupeKey: `manual:${owner.profileId}:earlier`,
+      runAfter: at(-MINUTE),
+    });
+    await addSnapshot(owner, { capturedAt: "2026-09-01T12:00:00+00:00", followers: ["pixel_forge"], following: [] });
+    const derive = await queueDerive(owner, NOW);
+
+    const drained = await drainJobs({ now: NOW, limit: 1, profileId: owner.profileId, kinds: ["derive_profile"] });
+
+    expect(drained).toEqual({ claimed: 1, succeeded: 1, failed: 0, retried: 0, cancelled: 0 });
+    expect((await jobRow(derive.id))?.status).toBe("succeeded");
+    expect((await jobRow(review.id))?.status).toBe("queued");
+    expect(await profileRow(owner.profileId)).toMatchObject({ contentRevision: 1, derivedRevision: 1 });
   });
 
   it("stops at the limit", async () => {

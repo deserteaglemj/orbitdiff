@@ -9,6 +9,7 @@ import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 
 import type { MeDto } from "./contracts";
+import { notFound, requireUuid } from "./shared";
 
 /**
  * Quota counters and checks. Every limit is in `LIMITS`; nothing here falls
@@ -38,6 +39,11 @@ function nextUtcDay(now: Date): string {
  * Add one to a daily counter in a single statement and return the new value.
  * With `limit`, the statement itself refuses to pass it and `null` is
  * returned, so two callers racing at the limit cannot both get through.
+ *
+ * This is the counter primitive. It takes a scope key, not a user id, so it is
+ * not a tenant function and nothing outside this module calls it: tenant code
+ * counts through countImport and countManualReview, which take the owner's id
+ * first and build the scope key themselves.
  */
 export async function bumpUsage(
   executor: Executor,
@@ -86,6 +92,37 @@ export async function assertImportQuota(userId: string, now: Date, executor: Exe
 export async function countImport(userId: string, now: Date, executor: Executor = getDb()): Promise<number> {
   const value = await bumpUsage(executor, userScope(userId), utcDay(now), "imports", LIMITS.importsPerUserPerDay);
   if (value === null) throw importQuotaError(now);
+  return value;
+}
+
+/**
+ * Count one manual review of a profile against today's limit, or throw
+ * `quota_exhausted` when none is left. The profile has to be the user's own:
+ * the ownership is checked in the query, and an id that does not exist, belongs
+ * to someone else, or is malformed is the same `not_found`. Nothing is counted
+ * for a profile the user does not own.
+ */
+export async function countManualReview(
+  userId: string,
+  profileId: string,
+  now: Date,
+  executor: Executor = getDb(),
+): Promise<number> {
+  const id = requireUuid(profileId);
+  const [owned] = await executor
+    .select({ id: profile.id })
+    .from(profile)
+    .where(and(eq(profile.userId, userId), eq(profile.id, id)));
+  if (!owned) throw notFound();
+  const limit = LIMITS.manualReviewsPerProfilePerDay;
+  const value = await bumpUsage(executor, profileScope(owned.id), utcDay(now), "manualReviews", limit);
+  if (value === null) {
+    throw new AppError(
+      "quota_exhausted",
+      `This profile has used all ${limit} manual reviews for today. Manual reviews are paused until the next UTC day.`,
+      { quota: "manual_reviews_per_day", limit, resetsAt: nextUtcDay(now) },
+    );
+  }
   return value;
 }
 

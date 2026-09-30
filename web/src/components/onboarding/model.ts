@@ -1,6 +1,6 @@
 import { validateName, validateTimezone, type DocumentVersions } from "@/components/auth/sign-up-model";
 import { CONSENT_VERSIONS } from "@/domain/limits";
-import type { ConsentStateDto } from "@/server/services/contracts";
+import type { ConsentStateDto, MeDto } from "@/server/services/contracts";
 
 export type { DocumentVersions };
 export type RequiredDocument = "terms" | "privacy";
@@ -89,10 +89,100 @@ export function describeAgreementRefusal(failure: { code: string; fields: readon
   return `The ${name} changed while this page was open. Reload this page, read the current ${name}, and agree again.`;
 }
 
-/** Where the flow starts for this account. */
-export function initialStep(account: { onboarded: boolean; profiles: number }): OnboardingStep {
-  if (!account.onboarded) return "details";
-  return account.profiles > 0 ? "done" : "profile";
+/**
+ * What the flow needs to know about where an account stands. Two facts that
+ * are easy to mistake for one:
+ *
+ * - `onboarded`: onboarding is complete AND the recorded consent is current.
+ *   This is what the guards require (requireOnboardedUser).
+ * - `completedBefore`: onboarding was completed at some point (`onboarded_at`
+ *   is set), whatever the consent log says now.
+ *
+ * An account with `completedBefore` true and `onboarded` false is a returning
+ * user whose agreement is no longer current, typically because a document
+ * changed. It is not a new account.
+ */
+export interface OnboardingStanding {
+  onboarded: boolean;
+  completedBefore: boolean;
+  /** How many profiles the account already has. */
+  profiles: number;
+}
+
+/** What the onboarding page hands to the flow: the standing of the account and the values the steps show. */
+export interface OnboardingAccount extends OnboardingStanding {
+  name: string;
+  timezone: string;
+  reviewHour: number;
+  consent: ConsentStateDto;
+}
+
+/**
+ * The account as the flow needs it, from the signed-in user's own record
+ * (`getMe`) and the `onboarded_at` of the session user. The two facts stay
+ * apart: `me.onboarded` also requires current consent, while `completedBefore`
+ * only says that onboarding was finished at some point.
+ */
+export function onboardingAccount(me: MeDto, onboardedAt: Date | null | undefined): OnboardingAccount {
+  return {
+    name: me.name,
+    timezone: me.timezone,
+    reviewHour: me.reviewHour,
+    onboarded: me.onboarded,
+    completedBefore: onboardedAt instanceof Date && !Number.isNaN(onboardedAt.getTime()),
+    profiles: me.usage.profiles,
+    consent: me.consent,
+  };
+}
+
+function hasProfiles(account: { profiles: number }): boolean {
+  return typeof account.profiles === "number" && Number.isInteger(account.profiles) && account.profiles > 0;
+}
+
+/**
+ * True for a returning user: onboarding was completed before, as the boolean
+ * true, and the account is not onboarded now. Such a user is only asked to
+ * agree to the current documents.
+ */
+export function isReturning(account: Pick<OnboardingStanding, "onboarded" | "completedBefore">): boolean {
+  return account.completedBefore === true && account.onboarded !== true;
+}
+
+/**
+ * Which heading the page carries on a step. A returning user sees the request
+ * to agree to the current documents, without the list of setup steps, while at
+ * the agreement and after it. Everyone else, and a returning user who has no
+ * profile yet and reaches the first profile step, sees the setup heading with
+ * its steps.
+ */
+export function flowHeader(
+  account: Pick<OnboardingStanding, "onboarded" | "completedBefore">,
+  step: OnboardingStep,
+): "agreement" | "setup" {
+  return isReturning(account) && step !== "profile" ? "agreement" : "setup";
+}
+
+/**
+ * Where the flow starts for this account.
+ *
+ * - first run: the details;
+ * - returning with an agreement that is no longer current: the agreement step,
+ *   never the details again;
+ * - onboarded without a profile: the first profile;
+ * - onboarded with a profile: nothing is left to do.
+ */
+export function initialStep(account: OnboardingStanding): OnboardingStep {
+  if (account.onboarded === true) return hasProfiles(account) ? "done" : "profile";
+  return isReturning(account) ? "consent" : "details";
+}
+
+/**
+ * Where the flow goes once the agreement is recorded. An account that already
+ * has a profile is done: it is not asked to "add your first profile", and one
+ * that holds the maximum is not led into a step that could only be refused.
+ */
+export function stepAfterAgreement(account: Pick<OnboardingStanding, "profiles">): OnboardingStep {
+  return hasProfiles(account) ? "done" : "profile";
 }
 
 /** The 24 hours of the day on a 24 hour clock. */

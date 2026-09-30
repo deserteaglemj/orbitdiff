@@ -8,6 +8,7 @@ import { isAdminEmail } from "@/server/auth/guards";
 import { getDb, type Executor } from "@/server/db/client";
 import {
   activityEntry,
+  auditEvent,
   changeEvent,
   consentRecord,
   exportSnapshot,
@@ -27,9 +28,9 @@ import {
   missingConsent,
   REQUIRED_CONSENT,
 } from "./consent";
-import type { ConsentStateDto, MeDto, OnboardingRequestDto } from "./contracts";
+import type { ConsentStateDto, MarketingConsentRequestDto, MeDto, OnboardingRequestDto } from "./contracts";
 import { reviewTimeFor } from "./profiles";
-import { isoOrNull, notFound } from "./shared";
+import { hasControlCharacter, isoOrNull, notFound } from "./shared";
 import { captureTimeOf } from "./snapshot-rows";
 import { getUserUsage, profileScope, userScope } from "./usage";
 
@@ -100,6 +101,9 @@ export async function updateMe(userId: string, input: UpdateMeInput, now: Date =
     if (name.length === 0 || name.length > NAME_MAX) {
       throw invalid("name", `The name must be 1 to ${NAME_MAX} characters.`);
     }
+    if (hasControlCharacter(name)) {
+      throw invalid("name", "The name must not contain control characters such as line breaks.");
+    }
     changes.name = name;
   }
   if (input.timezone !== undefined) {
@@ -139,23 +143,72 @@ export async function updateMe(userId: string, input: UpdateMeInput, now: Date =
   return getMe(userId, now);
 }
 
+/** The fields a product news choice may carry. Anything else is refused, never ignored. */
+const MARKETING_FIELDS = new Set(["granted", "version"]);
+
+/** Why a named version does not grant product news consent, or null when it does. Never repeats the value. */
+function marketingVersionProblem(value: unknown): string | null {
+  if (value === undefined) return "version is missing.";
+  if (typeof value !== "string") return "version must be text.";
+  if (value.length === 0) return "version is empty.";
+  if (value !== CONSENT_VERSIONS.marketing) return "version is not the current version of the product news consent.";
+  return null;
+}
+
 /**
- * Record a marketing consent choice. Appends to the log and mirrors the
- * choice on the account. Marketing consent is optional and separate: it is
- * never recorded as a side effect of accepting the terms, and changing it
- * never touches terms or privacy consent.
+ * Record a product news (marketing) consent choice. Appends to the log and
+ * mirrors the choice on the account. Marketing consent is optional and
+ * separate: it is never recorded as a side effect of accepting the terms, and
+ * changing it never touches terms or privacy consent.
+ *
+ * A grant is `{ granted: true, version }`. The version is the one the page
+ * showed, and the grant is recorded only when it is the current version of the
+ * product news consent, as a string, compared in full. Every other state is
+ * refused and nothing is written: no version, an empty one, a value that is
+ * not text, an older version, a version that was never published, the version
+ * of another document. Nothing is filled in for the caller, so a page that was
+ * opened before the text changed cannot agree to the new text unread. The row
+ * carries the version the request named.
+ *
+ * A withdrawal is `{ granted: false }`. It needs no version and whatever it
+ * carries there is not read, so turning product news off can never be refused
+ * for a stale page. The row records the version the server holds at that time.
+ *
+ * `granted` has to be a boolean. Anything else, and any other field, is refused.
  */
 export async function recordMarketingConsent(
   userId: string,
-  granted: boolean,
+  input: MarketingConsentRequestDto,
   now: Date = new Date(),
 ): Promise<ConsentStateDto> {
+  const given: Record<string, unknown> =
+    typeof input === "object" && input !== null && !Array.isArray(input)
+      ? (input as unknown as Record<string, unknown>)
+      : {};
+  const extra = Object.keys(given).filter((key) => !MARKETING_FIELDS.has(key));
+  if (extra.length > 0) {
+    throw new AppError("invalid_input", "Only granted and version can be sent here.", { fields: extra.sort() });
+  }
+  // A bare boolean is the earlier contract. `true` named no version, so it is a grant without one.
+  const granted = typeof input === "boolean" ? input : Object.hasOwn(given, "granted") ? given.granted : undefined;
   if (typeof granted !== "boolean") throw invalid("granted", "Send granted as true or false.");
+
+  let version: string = CONSENT_VERSIONS.marketing;
+  if (granted) {
+    const named = Object.hasOwn(given, "version") ? given.version : undefined;
+    const problem = marketingVersionProblem(named);
+    if (problem !== null) {
+      throw invalid("version", `${problem} Reload this page, read what product news covers, and choose again.`);
+    }
+    // Past this point the value is a string equal to the current version. It is what gets recorded.
+    version = named as string;
+  }
+
   const db = getDb();
   await db.transaction(async (tx) => {
     const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for("no key update");
     if (!owner) throw notFound();
-    await appendConsent(tx, userId, "marketing", CONSENT_VERSIONS.marketing, granted, "settings", now);
+    await appendConsent(userId, "marketing", version, granted, "settings", now, tx);
     await tx.update(user).set({ marketingOptIn: granted }).where(eq(user.id, userId));
   });
   return getConsentState(userId, db);
@@ -236,7 +289,7 @@ export async function completeOnboarding(
     const missing = missingConsent(await getConsentState(userId, tx));
     // A first onboarding records the acceptance itself, even when sign-up consent is still current.
     const kinds = owner.onboardedAt === null ? REQUIRED_CONSENT : missing;
-    for (const kind of kinds) await appendConsent(tx, userId, kind, accepted[kind], true, "onboarding", now);
+    for (const kind of kinds) await appendConsent(userId, kind, accepted[kind], true, "onboarding", now, tx);
     await tx
       .update(user)
       .set({ onboardedAt: owner.onboardedAt ?? now, acceptedTermsVersion: accepted.terms })
@@ -340,14 +393,21 @@ export interface AccountExport {
     manualReviews: number;
     jobs: number;
   }>;
+  /**
+   * Security-relevant events recorded for this account, such as a completed
+   * password reset. `detail` holds a refusal code or nothing, never an address
+   * or a request value.
+   */
+  securityEvents: Array<{ action: string; at: string; detail: unknown }>;
 }
 
 /**
  * Everything stored for one user, and nothing about anyone else: every query
  * below is filtered by this user id (usage counters by this user's scope
- * keys). Columns are listed one by one, so a column added later is not
- * exported by accident. Never included: password hashes, the credential of a
- * sign-in, verification values, captured mail, and internal job locks.
+ * keys, security events by the account they were recorded for). Columns are
+ * listed one by one, so a column added later is not exported by accident.
+ * Never included: password hashes, the credential of a sign-in, verification
+ * values, captured mail, and internal job locks.
  */
 export async function exportAccount(userId: string, now: Date = new Date()): Promise<AccountExport> {
   const db = getDb();
@@ -400,6 +460,11 @@ export async function exportAccount(userId: string, now: Date = new Date()): Pro
     .from(usageDaily)
     .where(inArray(usageDaily.scopeKey, [...scopes.keys()]))
     .orderBy(asc(usageDaily.day), asc(usageDaily.scopeKey));
+  const securityEvents = await db
+    .select({ action: auditEvent.action, at: auditEvent.at, detail: auditEvent.detail })
+    .from(auditEvent)
+    .where(eq(auditEvent.actorUserId, userId))
+    .orderBy(asc(auditEvent.at), asc(auditEvent.id));
 
   return {
     format: "orbitdiff.account-export",
@@ -503,6 +568,11 @@ export async function exportAccount(userId: string, now: Date = new Date()): Pro
       imports: row.imports,
       manualReviews: row.manualReviews,
       jobs: row.jobs,
+    })),
+    securityEvents: securityEvents.map((row) => ({
+      action: row.action,
+      at: row.at.toISOString(),
+      detail: row.detail ?? null,
     })),
   };
 }

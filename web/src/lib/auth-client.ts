@@ -12,13 +12,23 @@ export { SIGNUP_CODE_HEADER } from "@/server/auth/signup-code";
  * `marketingOptIn` can be sent at sign-up; `status`, `reviewHour`, and
  * `onboardedAt` are readable on the session user and cannot be sent.
  *
+ * Sign-up also sends `acceptedPrivacyVersion` beside `acceptedTermsVersion`.
+ * It is not a user field: the sign-up gate reads it from the request and
+ * records privacy consent at the version it names.
+ *
  * Sign-up example:
  *   authClient.signUp.email(
- *     { name, email, password, timezone, acceptedTermsVersion, marketingOptIn, callbackURL },
+ *     { name, email, password, timezone, acceptedTermsVersion, acceptedPrivacyVersion, marketingOptIn, callbackURL },
  *     { headers: { [SIGNUP_CODE_HEADER]: code } },
  *   )
  *
  * What the server expects from a screen:
+ * - `acceptedTermsVersion` and `acceptedPrivacyVersion` are the versions of the
+ *   Terms and the Privacy notice that the page showed, each equal to the
+ *   current version of its document. Anything else is refused with 422
+ *   TERMS_NOT_ACCEPTED or PRIVACY_NOT_ACCEPTED. A request that leaves
+ *   `acceptedPrivacyVersion` out names one version for both documents, which
+ *   is only accepted while both documents hold that version.
  * - `callbackURL` and `redirectTo` are a path on this site ("/sign-in"), at most
  *   512 characters. A full URL is refused.
  * - The verification link signs no one in and verifies nothing by itself. It

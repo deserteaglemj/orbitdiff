@@ -52,6 +52,46 @@ export async function readJobCapacity(now: Date, executor: Executor = getDb()): 
   return { used, limit, paused: used >= limit };
 }
 
+export interface JobStartGrant {
+  /** How many of the wanted first-time starts fit in what was left of the day. They are counted. */
+  granted: number;
+  /** True when the day's count had already reached the capacity: nothing may start. */
+  exhausted: boolean;
+}
+
+/**
+ * Count first-time job starts against CAPACITY_MAX_JOBS_PER_DAY, where the count is written.
+ *
+ * The day's row is locked before it is read (created at zero when the day has none), so two
+ * claims can never both spend the same room: the second waits, then sees what the first
+ * counted. Up to `wanted` starts are granted and added in the same transaction. Call it
+ * inside the transaction that claims the jobs, so a claim that rolls back counts nothing.
+ */
+export async function reserveJobStarts(tx: Executor, now: Date, wanted: number): Promise<JobStartGrant> {
+  const limit = getEnv().capacity.maxJobsPerDay;
+  const day = utcDay(now);
+  const [locked] = await tx
+    .insert(usageDaily)
+    .values({ day, scopeKey: GLOBAL_SCOPE, jobs: 0 })
+    .onConflictDoUpdate({
+      target: [usageDaily.day, usageDaily.scopeKey],
+      // Writes the value it already has: the point is the row lock, held until commit.
+      set: { jobs: sql`${usageDaily.jobs}` },
+    })
+    .returning({ jobs: usageDaily.jobs });
+  const used = locked?.jobs ?? 0;
+  const room = limit - used;
+  if (room <= 0) return { granted: 0, exhausted: true };
+  const granted = Math.max(0, Math.min(Math.floor(wanted), room));
+  if (granted > 0) {
+    await tx
+      .update(usageDaily)
+      .set({ jobs: sql`${usageDaily.jobs} + ${granted}` })
+      .where(and(eq(usageDaily.day, day), eq(usageDaily.scopeKey, GLOBAL_SCOPE)));
+  }
+  return { granted, exhausted: false };
+}
+
 /** Throws `capacity_paused` while the day's job capacity is used up. Nothing falls through to a paid tier. */
 export async function assertJobCapacity(now: Date, executor: Executor = getDb()): Promise<void> {
   if ((await readJobCapacity(now, executor)).paused) {

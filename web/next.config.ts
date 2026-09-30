@@ -5,8 +5,11 @@ import type { NextConfig } from "next";
  *
  * Pages get their Content-Security-Policy from src/proxy.ts, because it carries
  * a nonce that is new for each request. Everything the proxy does not run on
- * (API routes, the build output, the image optimizer, files from public/) gets
- * the fixed policy below: nothing may load or run, nothing may frame it.
+ * (API routes, the build output, the image optimizer, a file name at the root
+ * as files from public/ are served) gets the fixed policy below: nothing may
+ * load or run, nothing may frame it. A path that only resembles one of those,
+ * such as /profiles/abc.png or /_next/staticfoo, is a page and belongs to the
+ * proxy.
  *
  * The values repeat src/server/auth/security-headers.ts, since this file cannot
  * import application modules. tests/unit/server/proxy.test.ts compares the two
@@ -38,10 +41,12 @@ const nextConfig: NextConfig = {
         has: [{ type: "header", key: "x-forwarded-proto", value: "https" }],
         headers: [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" }],
       },
+      // The four sets below are exactly the paths the proxy matcher leaves out. Keep the two in step.
       { source: "/api/:path*", headers: FIXED_POLICY },
-      { source: "/_next/static/:path*", headers: FIXED_POLICY },
+      { source: "/_next/static/:path+", headers: FIXED_POLICY },
       { source: "/_next/image", headers: FIXED_POLICY },
-      { source: "/:file(.*\\.svg|.*\\.png|.*\\.ico|.*\\.txt|.*\\.xml)", headers: FIXED_POLICY },
+      // A file name at the root, one path segment, as files from public/ are served.
+      { source: "/:file([^/]+\\.(?:svg|png|ico|txt|xml))", headers: FIXED_POLICY },
     ];
   },
 };

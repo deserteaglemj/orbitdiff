@@ -109,6 +109,28 @@ describe("daily reviews across clock changes", () => {
     ]);
   });
 
+  it("keeps the next day's review when a late run picks up a late-evening review after local midnight", async () => {
+    // 23:00 in Asia/Kolkata is 17:30 UTC. The scheduler fires at minute 17, so a run that is
+    // 14 minutes late starts at 18:31 UTC, which is 00:01 on the 11th in Kolkata.
+    const zone = "Asia/Kolkata";
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio", { timezone: zone });
+    await getDb().update(user).set({ reviewHour: 23 }).where(eq(user.id, owner.userId));
+    await getDb()
+      .update(profile)
+      .set({ nextReviewAt: nextReviewAt(new Date("2026-06-10T00:00:00.000Z"), zone, 23) })
+      .where(eq(profile.id, owner.profileId));
+    expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe("2026-06-10T17:30:00.000Z");
+
+    const late = await runTick({ now: new Date("2026-06-10T18:31:00.000Z") });
+    const onTime = await runTick({ now: new Date("2026-06-11T18:17:00.000Z") });
+
+    expect([late.enqueued, onTime.enqueued]).toEqual([1, 1]);
+    // Each review is keyed by the local date it was scheduled for, not the date of the run.
+    expect(await reviewDates(owner)).toEqual(["2026-06-10", "2026-06-11"]);
+    expect(await activityOf(owner.profileId, "review")).toHaveLength(2);
+    expect((await profileRow(owner.profileId)).nextReviewAt?.toISOString()).toBe("2026-06-12T17:30:00.000Z");
+  });
+
   it("does not review the same local date again after the user changes timezone during the day", async () => {
     const morning = new Date("2026-06-10T14:00:00.000Z");
     const owner = await chicagoOwner(new Date("2026-06-10T05:00:00.000Z"));

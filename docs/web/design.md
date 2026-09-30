@@ -145,7 +145,7 @@ Count history is the series of dated snapshots whose direction coverage is compl
 
 ### 4.8 Review schedule
 
-Each user has an IANA timezone and a local review hour (0 to 23). `nextReviewAt(now, timezone, hour)` is the first instant strictly after `now` whose local time is `hour:00`. A local time that does not exist (spring forward) resolves to the first valid instant after the gap; a local time that occurs twice (fall back) resolves to the first occurrence. The daily job key is `daily:<profileId>:<localDate>`, so a profile gets at most one scheduled review per local date on 23, 24, and 25 hour days and across timezone changes.
+Each user has an IANA timezone and a local review hour (0 to 23). `nextReviewAt(now, timezone, hour)` is the first instant strictly after `now` whose local time is `hour:00`. A local time that does not exist (spring forward) resolves to the first valid instant after the gap; a local time that occurs twice (fall back) resolves to the first occurrence. The daily job key is `daily:<profileId>:<localDate>`, where the local date is that of the review time that was due, in the user's timezone, not that of the run that picks it up. A profile therefore gets at most one scheduled review per local date on 23, 24, and 25 hour days and across timezone changes, and a run that starts after local midnight does not use up the next day's review.
 
 ## 5. Jobs
 
@@ -158,7 +158,7 @@ Each user has an IANA timezone and a local review hour (0 to 23). `nextReviewAt(
 Queue rules:
 
 - Enqueue inserts with a unique `dedupe_key` (`derive:<profileId>:<contentRevision>`, `daily:<profileId>:<localDate>`, `manual:<profileId>:<requestId>`). One queued or running job per profile and kind is enforced by a partial unique index.
-- Claim: `for update skip locked` on queued jobs whose `run_after` has passed, then `running` with a fresh `lock_token`, a lease, and `attempts + 1`.
+- Claim: `for update skip locked` on queued jobs whose `run_after` has passed, then `running` with a fresh `lock_token`, a lease, and `attempts + 1`. A job counts toward `CAPACITY_MAX_JOBS_PER_DAY` once, on its first claim. The claim locks the day's count, reads it, and raises it in the same transaction, so overlapping claims together never pass the capacity; once it is reached nothing is claimed until the next UTC day.
 - Authorize at execution time inside the worker: the user must exist, be verified, and be `active`; the profile must exist and, for reviews, be `active`. Otherwise the job is `cancelled` with a reason.
 - Complete: one transaction writes results and marks the job, guarded by `status = 'running' and lock_token = ?`. If the guard fails nothing is written. `activity_entry` is unique on `(job_id, kind)`, so duplicate delivery cannot apply twice.
 - Failure: retry with backoff (5 minutes, then 30 minutes) up to three attempts, then `failed` with a `job_failed` activity entry and `profile.last_failure_*`. `last_success_at` is never changed by a failure.
@@ -174,9 +174,9 @@ All values live in `web/src/domain/limits.ts`. When a limit is reached the actio
 ## 7. Authorization
 
 - `requireUser()`: valid session, verified email, `status = 'active'`. `requireOnboardedUser()` additionally requires recorded terms and privacy consent and `onboarded_at`.
-- Every service function takes `userId` first and filters by it. A missing id and another tenant's id both return `not_found` (HTTP 404).
+- Every service function that reads or writes tenant data takes `userId` first and filters by it. A missing id and another tenant's id both return `not_found` (HTTP 404). The one counter primitive that takes a scope key instead, `bumpUsage`, is called only inside the usage module: tenant code counts through `countImport` and `countManualReview`, which take the owner's id first.
 - A suspended account cannot create a session or use any account endpoint except reading its state and signing out, and cannot delete itself.
-- Admin: `requireAdmin()` passes only when the session user's verified, lowercased email is in `ADMIN_EMAILS`. No database column, request field, or signup order grants admin. Everyone else gets 404 on `/admin` and `/api/admin/*`.
+- Admin: `requireAdmin()` passes only when the session user's verified, lowercased email is in `ADMIN_EMAILS`. No database column, request field, or signup order grants admin. Everyone else gets 404 on `/api/admin/*`. `/admin` is a signed-in area: a request without a valid session is sent to sign-in, an unverified address to the verify page, an account that is not onboarded to onboarding, a suspended account sees the suspended notice, and every other account that is not the admin gets 404 (see docs/web/interface.md section 11). No admin data is ever rendered for anyone but the admin.
 - State-changing routes require a same-origin `Origin` header.
 - Request bodies are parsed with strict schemas; unknown keys are rejected.
 - Logs never contain tokens, cookies, passwords, or full email addresses.
@@ -190,7 +190,7 @@ Errors are `{ "error": { "code", "message", "details"? } }`. Codes and statuses:
 | `GET /api/health` | Public. Stage, commit, database reachability, mail delivery mode, registration state, last tick. No secrets. |
 | `/api/auth/*` | Better Auth, limited to sign-up, sign-in, sign-out, session, email verification, password reset and change, update of name and timezone, account deletion with the password, and session listing and revocation. Bodies up to 16 KiB. Redirect targets are site paths. Refusals from inside Better Auth use its own `{ code, message }` body. Sign-up is gated, in order, by the operator name, mail delivery, capacity, the optional access code, and consent. |
 | `GET, PATCH /api/me` | Profile of the signed-in user; PATCH accepts `name`, `timezone`, `reviewHour`. |
-| `POST /api/me/consent` | Record a marketing consent change. |
+| `POST /api/me/consent` | Record a marketing consent change. A grant names the current marketing version, `{ "granted": true, "version": "2026-09-30" }`, and is refused with `invalid_input` otherwise. A withdrawal is `{ "granted": false }` and needs no version. |
 | `POST /api/me/onboarding` | Record terms and privacy consent and mark onboarding complete. |
 | `GET, POST /api/profiles` | List and add profiles. |
 | `GET, PATCH, DELETE /api/profiles/:id` | Read, pause or resume (`{ "status": "paused" }`), remove. |

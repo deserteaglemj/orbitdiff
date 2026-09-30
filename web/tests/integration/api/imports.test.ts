@@ -6,10 +6,12 @@ import { GET as countsGET } from "@/app/api/profiles/[id]/counts/route";
 import { GET as eventsGET } from "@/app/api/profiles/[id]/events/route";
 import { POST } from "@/app/api/profiles/[id]/imports/route";
 import { GET as relationshipsGET } from "@/app/api/profiles/[id]/relationships/route";
+import { POST as reviewPOST } from "@/app/api/profiles/[id]/review/route";
 import { GET as snapshotsGET } from "@/app/api/profiles/[id]/snapshots/route";
 import { LIMITS } from "@/domain/limits";
 import { closeDb, getDb } from "@/server/db/client";
 import { changeEvent, exportSnapshot, job, profile, systemState, usageDaily } from "@/server/db/schema";
+import { drainJobs } from "@/server/jobs/tick";
 import { importExport } from "@/server/services/imports";
 import { createProfile } from "@/server/services/profiles";
 import { bumpUsage, DATABASE_SIZE_STATE_KEY, GLOBAL_SCOPE, userScope, utcDay } from "@/server/services/usage";
@@ -206,6 +208,42 @@ describe("the run right after an import", () => {
     expect(untouched?.status).toBe("queued");
   });
 
+  it("processes the import even when a manual review of the profile was queued first", async () => {
+    const atlas = await atlasProfile();
+    const asked = await callProfileRoute(reviewPOST, atlas.profileId, {
+      method: "POST",
+      url: `/api/profiles/${atlas.profileId}/review`,
+      cookie: atlas.cookie,
+    });
+    expect(asked.status).toBe(202);
+
+    const response = await importInto(atlas.cookie, atlas.profileId, exportPayload());
+
+    expect(response.status).toBe(201);
+    const jobs = await getDb().select().from(job).where(eq(job.profileId, atlas.profileId));
+    const statusOf = (kind: string) => jobs.find((row) => row.kind === kind)?.status;
+    // The run after an import is for the import. The review waits for the hourly run.
+    expect({ derive: statusOf("derive_profile"), review: statusOf("manual_review") }).toEqual({
+      derive: "succeeded",
+      review: "queued",
+    });
+    const row = await profileRow(atlas.profileId);
+    expect({ content: row.contentRevision, derived: row.derivedRevision }).toEqual({ content: 1, derived: 1 });
+  });
+
+  it("queues the job at the time the import was taken, so a run at that time can claim it", async () => {
+    const atlas = await atlasProfile();
+    // The clock of this process, a minute behind the database's.
+    const now = new Date(Date.now() - 60_000);
+
+    const receipt = await importExport(atlas.userId, atlas.profileId, exportPayload(), now);
+
+    expect(receipt.job?.runAfter).toBe(now.toISOString());
+    const drained = await drainJobs({ now, limit: 1, profileId: atlas.profileId, kinds: ["derive_profile"] });
+    expect(drained).toMatchObject({ claimed: 1, succeeded: 1 });
+    expect((await profileRow(atlas.profileId)).derivedRevision).toBe(1);
+  });
+
   it("starts nothing for a duplicate import", async () => {
     const atlas = await atlasProfile();
     await importExport(atlas.userId, atlas.profileId, exportPayload());
@@ -283,6 +321,13 @@ describe("GET /api/profiles/:id/relationships", () => {
     await expectError(response, 422, "invalid_input");
   });
 
+  it("answers 422 naming q for a search text with a NUL byte, like every other list", async () => {
+    const atlas = await atlasProfile();
+    const response = await read(relationshipsGET, atlas.cookie, atlas.profileId, "relationships", "?q=nova%00");
+    const body = await expectError(response, 422, "invalid_input");
+    expect(body.error.details).toEqual({ fields: ["q"] });
+  });
+
   it("answers 422 for a page size that is not a number", async () => {
     const atlas = await atlasProfile();
     const response = await read(relationshipsGET, atlas.cookie, atlas.profileId, "relationships", "?pageSize=many");
@@ -322,6 +367,17 @@ describe("GET /api/profiles/:id/events", () => {
     expect(byType.data.map((event: { username: string }) => event.username)).toEqual(["pixel_forge"]);
     const byName = await (await read(eventsGET, atlas.cookie, atlas.profileId, "events", "?q=ember")).json();
     expect(byName.data.map((event: { username: string }) => event.username)).toEqual(["ember_lab"]);
+  });
+
+  it.each([
+    ["a NUL byte", "?q=ember%00lab"],
+    ["only a NUL byte", "?q=%00"],
+    ["a line break inside the text", "?q=ember%0Alab"],
+    ["an escape character", "?q=%1Bember"],
+  ])("answers 422 naming q for a search text with %s, not a server error", async (_label, query) => {
+    const atlas = await withEvents();
+    const body = await expectError(await read(eventsGET, atlas.cookie, atlas.profileId, "events", query), 422, "invalid_input");
+    expect(body.error.details).toEqual({ fields: ["q"] });
   });
 
   it("answers 422 for a type it does not know", async () => {
@@ -410,6 +466,12 @@ describe("GET /api/activity", () => {
   it.each(["?kind=login", "?status=pending", "?page=0", "?pageSize=x"])("answers 422 for %s", async (query) => {
     const atlas = await atlasProfile();
     await expectError(await get(atlas.cookie, query), 422, "invalid_input");
+  });
+
+  it("answers 422 naming q for a search text with a NUL byte, not a server error", async () => {
+    const atlas = await atlasProfile();
+    const body = await expectError(await get(atlas.cookie, "?q=atlas%00"), 422, "invalid_input");
+    expect(body.error.details).toEqual({ fields: ["q"] });
   });
 
   it("answers 404 for a profileId that does not exist or is malformed", async () => {

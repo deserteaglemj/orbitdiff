@@ -71,20 +71,24 @@ export async function hasCurrentConsent(userId: string, executor: Executor = get
 }
 
 /**
- * Append one row to the log at the version the caller names. The version is
- * never filled in here: a row says which text a person answered, so whoever
- * writes it has to know that. Rows are never updated or deleted. The recorded
- * time is never earlier than the latest row of that kind, so "the latest row
- * decides" has one answer.
+ * Append one row to the log of one user, at the version the caller names. The
+ * version is never filled in here: a row says which text a person answered, so
+ * whoever writes it has to know that. Rows are never updated or deleted. The
+ * recorded time is never earlier than the latest row of that kind, so "the
+ * latest row decides" has one answer.
+ *
+ * Like every function that writes tenant rows, it takes the user id first and
+ * the executor last. Pass the caller's transaction as the executor when the
+ * row has to commit together with something else.
  */
 export async function appendConsent(
-  executor: Executor,
   userId: string,
   kind: ConsentKind,
   version: string,
   granted: boolean,
   source: ConsentSource,
   now: Date,
+  executor: Executor = getDb(),
 ): Promise<void> {
   const [latest] = await executor
     .select({ recordedAt: consentRecord.recordedAt })

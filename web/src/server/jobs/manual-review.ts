@@ -10,15 +10,10 @@ import { job, profile, user } from "@/server/db/schema";
 import { AppError } from "@/server/http/errors";
 import type { JobDto } from "@/server/services/contracts";
 import { notFound, requireUuid } from "@/server/services/shared";
-import { bumpUsage, profileScope, utcDay } from "@/server/services/usage";
+import { countManualReview } from "@/server/services/usage";
 
 import { assertJobCapacity } from "./capacity";
 import { dedupeKey, enqueueJob, REVIEW_KINDS, toJobDto } from "./queue";
-
-/** First instant of the next UTC day, when the daily counters start again. */
-function nextUtcDay(now: Date): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
-}
 
 /**
  * Queue a manual review of one of the user's own profiles. The review itself runs later,
@@ -66,18 +61,9 @@ export async function requestManualReview(userId: string, profileId: string, now
       dedupeKey: dedupeKey.manual(id, randomUUID()),
       runAfter: now,
     });
-    // A review that was already waiting is handed back as is and costs nothing.
-    if (queued.created) {
-      const limit = LIMITS.manualReviewsPerProfilePerDay;
-      const used = await bumpUsage(tx, profileScope(id), utcDay(now), "manualReviews", limit);
-      if (used === null) {
-        throw new AppError(
-          "quota_exhausted",
-          `This profile has used all ${limit} manual reviews for today. Manual reviews are paused until the next UTC day.`,
-          { quota: "manual_reviews_per_day", limit, resetsAt: nextUtcDay(now) },
-        );
-      }
-    }
+    // A review that was already waiting is handed back as is and costs nothing. A new one
+    // counts against the profile's day; at the limit this throws and the job is rolled back.
+    if (queued.created) await countManualReview(userId, id, now, tx);
     return toJobDto(queued.job);
   });
 }

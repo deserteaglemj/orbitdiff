@@ -1,11 +1,18 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { describeApiFailure } from "@/components/onboarding/api";
 import {
   buildOnboardingBody,
   consentToConfirm,
+  flowHeader,
   initialStep,
+  isReturning,
+  onboardingAccount,
   REVIEW_HOUR_OPTIONS,
+  stepAfterAgreement,
   validateDetails,
 } from "@/components/onboarding/model";
 import { CONSENT_VERSIONS } from "@/domain/limits";
@@ -110,20 +117,152 @@ describe("buildOnboardingBody", () => {
 });
 
 describe("initialStep", () => {
+  /** A first run: onboarding was never completed. */
+  const firstRun = { completedBefore: false };
+  /** Onboarding was completed at some point: onboarded_at is set. */
+  const returning = { completedBefore: true };
+
   it("starts with the details until onboarding is complete", () => {
-    expect(initialStep({ onboarded: false, profiles: 0 })).toBe("details");
+    expect(initialStep({ ...firstRun, onboarded: false, profiles: 0 })).toBe("details");
   });
 
   it("goes straight to the first profile once onboarding is complete", () => {
-    expect(initialStep({ onboarded: true, profiles: 0 })).toBe("profile");
+    expect(initialStep({ ...returning, onboarded: true, profiles: 0 })).toBe("profile");
   });
 
   it("has nothing left to do once a profile exists", () => {
-    expect(initialStep({ onboarded: true, profiles: 1 })).toBe("done");
+    expect(initialStep({ ...returning, onboarded: true, profiles: 1 })).toBe("done");
   });
 
-  it("still starts with the details when a profile exists but onboarding is not complete", () => {
-    expect(initialStep({ onboarded: false, profiles: 2 })).toBe("details");
+  it("still starts with the details when a profile exists but onboarding was never completed", () => {
+    expect(initialStep({ ...firstRun, onboarded: false, profiles: 2 })).toBe("details");
+  });
+
+  it("starts a returning user whose consent went out of date at the agreement step, not at the details", () => {
+    expect(initialStep({ ...returning, onboarded: false, profiles: 2 })).toBe("consent");
+    expect(initialStep({ ...returning, onboarded: false, profiles: 3 })).toBe("consent");
+  });
+
+  it("starts a returning user without a profile at the agreement step as well", () => {
+    expect(initialStep({ ...returning, onboarded: false, profiles: 0 })).toBe("consent");
+  });
+
+  it("treats anything but completedBefore true as a first run", () => {
+    for (const completedBefore of [undefined, null, "true", 1]) {
+      const account = { completedBefore: completedBefore as unknown as boolean, onboarded: false, profiles: 1 };
+      expect(initialStep(account), String(completedBefore)).toBe("details");
+    }
+  });
+});
+
+describe("stepAfterAgreement", () => {
+  it("is done for an account that already has profiles: it is not asked for a first profile again", () => {
+    expect(stepAfterAgreement({ profiles: 1 })).toBe("done");
+    expect(stepAfterAgreement({ profiles: 2 })).toBe("done");
+  });
+
+  it("is done for an account that holds the maximum of three profiles, which could not add another", () => {
+    expect(stepAfterAgreement({ profiles: 3 })).toBe("done");
+  });
+
+  it("is the first profile for an account that has none", () => {
+    expect(stepAfterAgreement({ profiles: 0 })).toBe("profile");
+  });
+
+  it("asks for a first profile when the count is not a positive whole number", () => {
+    for (const profiles of [undefined, null, "2", Number.NaN, -1]) {
+      expect(stepAfterAgreement({ profiles: profiles as unknown as number }), String(profiles)).toBe("profile");
+    }
+  });
+});
+
+describe("onboardingAccount: what the page hands to the flow", () => {
+  const me = {
+    id: "user-1",
+    email: "atlas@orbitdiff.test",
+    name: "Atlas",
+    timezone: "Europe/Berlin",
+    reviewHour: 7,
+    onboarded: false,
+    isAdmin: false,
+    consent: current,
+    usage: { profiles: 2, profilesLimit: 3, importsToday: 0, importsPerDayLimit: 10, rosterBytes: 0, rosterBytesLimit: 1 },
+  };
+
+  it("keeps the two facts apart: onboarded from the account, completedBefore from onboarded_at", () => {
+    expect(onboardingAccount(me, new Date("2026-08-01T09:00:00.000Z"))).toEqual({
+      name: "Atlas",
+      timezone: "Europe/Berlin",
+      reviewHour: 7,
+      onboarded: false,
+      completedBefore: true,
+      profiles: 2,
+      consent: current,
+    });
+  });
+
+  it("reports a first run when onboarded_at was never set", () => {
+    expect(onboardingAccount(me, null).completedBefore).toBe(false);
+    expect(onboardingAccount(me, undefined).completedBefore).toBe(false);
+  });
+
+  it("does not take an invalid date for a completed onboarding", () => {
+    expect(onboardingAccount(me, new Date("not a date")).completedBefore).toBe(false);
+  });
+
+  it("hands over nothing but what the flow shows", () => {
+    expect(Object.keys(onboardingAccount(me, null)).sort()).toEqual(
+      ["completedBefore", "consent", "name", "onboarded", "profiles", "reviewHour", "timezone"].sort(),
+    );
+  });
+});
+
+describe("flowHeader: which heading the page carries", () => {
+  const returning = { completedBefore: true, onboarded: false };
+  const firstRun = { completedBefore: false, onboarded: false };
+
+  it("says to agree to the current documents while a returning user is at the agreement, and after it", () => {
+    expect(flowHeader(returning, "consent")).toBe("agreement");
+    expect(flowHeader(returning, "done")).toBe("agreement");
+  });
+
+  it("is the setup heading with its steps when a returning user without a profile reaches the first profile", () => {
+    expect(flowHeader(returning, "profile")).toBe("setup");
+  });
+
+  it("is the setup heading on every step of a first run", () => {
+    for (const step of ["details", "consent", "profile", "done"] as const) {
+      expect(flowHeader(firstRun, step), step).toBe("setup");
+    }
+  });
+
+  it("is the setup heading for an onboarded account that adds its first profile", () => {
+    expect(flowHeader({ completedBefore: true, onboarded: true }, "profile")).toBe("setup");
+  });
+});
+
+describe("the flow's wiring", () => {
+  const source = readFileSync(
+    path.resolve(import.meta.dirname, "../../../src/components/onboarding/onboarding-flow.tsx"),
+    "utf8",
+  );
+
+  it("asks the model where to go after the agreement, never a fixed step", () => {
+    expect(source).toContain("setStep(stepAfterAgreement(account))");
+    expect(source).not.toContain('setStep("profile")');
+  });
+
+  it("starts where the model says", () => {
+    expect(source).toContain("initialStep(account)");
+  });
+});
+
+describe("returning after onboarding", () => {
+  it("is true only for an account that completed onboarding before and is not onboarded now", () => {
+    expect(isReturning({ completedBefore: true, onboarded: false })).toBe(true);
+    expect(isReturning({ completedBefore: true, onboarded: true })).toBe(false);
+    expect(isReturning({ completedBefore: false, onboarded: false })).toBe(false);
+    expect(isReturning({ completedBefore: "true" as unknown as boolean, onboarded: false })).toBe(false);
   });
 });
 

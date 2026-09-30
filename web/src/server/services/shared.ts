@@ -89,13 +89,30 @@ export function toPage<T>(data: T[], window: PageWindow, totalItems: number): Pa
 /** Longest search text a list accepts. */
 export const SEARCH_MAX = 100;
 
-/** A trimmed, lowercased search text, or null when there is nothing to search for. */
+const CONTROL_CHARACTER = /\p{Cc}/u;
+
+/**
+ * True when the text holds a control character: U+0000 to U+001F and U+007F to U+009F.
+ * Postgres cannot store U+0000 in text at all, and none of them belongs in a name or a
+ * search text, so they are refused at the edge instead of failing inside a statement.
+ */
+export function hasControlCharacter(value: string): boolean {
+  return CONTROL_CHARACTER.test(value);
+}
+
+/**
+ * A trimmed, lowercased search text, or null when there is nothing to search for. A text
+ * that is too long, or that holds a control character after trimming, is `invalid_input`.
+ */
 export function searchText(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim().toLowerCase();
   if (text.length === 0) return null;
   if (text.length > SEARCH_MAX) {
     throw new AppError("invalid_input", `q must be at most ${SEARCH_MAX} characters.`, { fields: ["q"] });
+  }
+  if (hasControlCharacter(text)) {
+    throw new AppError("invalid_input", "q must not contain control characters.", { fields: ["q"] });
   }
   return text;
 }

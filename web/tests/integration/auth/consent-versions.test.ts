@@ -50,7 +50,16 @@ async function userCount(): Promise<number> {
 
 /** Sign up naming the current Terms, with `acceptedPrivacyVersion` set to anything, or left out for undefined. */
 function signUpWithPrivacy(value: unknown, extra: Record<string, unknown> = {}): Promise<Response> {
-  return signUp({ email: EMAIL, extra: value === undefined ? extra : { ...extra, acceptedPrivacyVersion: value } });
+  return signUp({
+    email: EMAIL,
+    acceptedPrivacyVersion: null,
+    extra: value === undefined ? extra : { ...extra, acceptedPrivacyVersion: value },
+  });
+}
+
+/** Sign up the way a page that names one version for both documents does: no privacy version in the request. */
+function signUpNamingOneVersion(input: Omit<Parameters<typeof signUp>[0], "email" | "acceptedPrivacyVersion"> = {}) {
+  return signUp({ email: EMAIL, ...input, acceptedPrivacyVersion: null });
 }
 
 async function expectPrivacyRefusal(response: Response): Promise<string> {
@@ -62,12 +71,41 @@ async function expectPrivacyRefusal(response: Response): Promise<string> {
   return body.message;
 }
 
+describe("the sign-up test helper sends what the sign-up screen sends", () => {
+  it("names the current version of each document, so it still registers after the Privacy notice alone changed", async () => {
+    await withServerVersions({ privacy: BUMPED }, async () => {
+      const response = await signUp({ email: EMAIL });
+      expect(response.status).toBe(200);
+      expect(await consentLog()).toEqual([
+        `marketing:${CONSENT_VERSIONS.marketing}:false:signup`,
+        `privacy:${BUMPED}:true:signup`,
+        `terms:${SHOWN.terms}:true:signup`,
+      ]);
+    });
+  });
+
+  it("names the privacy version it is given", async () => {
+    await withServerVersions({ privacy: BUMPED }, async () => {
+      const message = await expectPrivacyRefusal(await signUp({ email: EMAIL, acceptedPrivacyVersion: SHOWN.privacy }));
+      // Named and stale, which reads differently from not named at all.
+      expect(message).toContain("acceptedPrivacyVersion is not the current version of the Privacy notice");
+    });
+  });
+
+  it("leaves the privacy version out when asked to, so the one named version stands for both documents", async () => {
+    expect((await signUp({ email: EMAIL, acceptedPrivacyVersion: null })).status).toBe(200);
+    await resetDatabase();
+    await withServerVersions({ privacy: BUMPED }, async () => {
+      const message = await expectPrivacyRefusal(await signUp({ email: EMAIL, acceptedPrivacyVersion: null }));
+      expect(message).toContain("acceptedPrivacyVersion is missing");
+    });
+  });
+});
+
 describe("sign-up records privacy consent only at a version the request named", () => {
   it("refuses a request that names only the earlier version after the Privacy notice alone changed", async () => {
     await withServerVersions({ privacy: BUMPED }, async () => {
-      const message = await expectPrivacyRefusal(
-        await signUp({ email: EMAIL, acceptedTermsVersion: SHOWN.terms }),
-      );
+      const message = await expectPrivacyRefusal(await signUpNamingOneVersion({ acceptedTermsVersion: SHOWN.terms }));
       expect(message).toBe(
         "acceptedPrivacyVersion is missing, and the version the request names is not the current version of the " +
           "Privacy notice. Reload the page, read the current Privacy notice, and agree again to create an account.",
@@ -77,7 +115,7 @@ describe("sign-up records privacy consent only at a version the request named", 
 
   it("never writes a privacy row at a version the request did not name", async () => {
     await withServerVersions({ privacy: BUMPED }, async () => {
-      await signUp({ email: EMAIL, acceptedTermsVersion: SHOWN.terms });
+      await signUpNamingOneVersion({ acceptedTermsVersion: SHOWN.terms });
       expect((await consentLog()).filter((row) => row.includes(BUMPED))).toEqual([]);
     });
   });
@@ -143,13 +181,13 @@ describe("sign-up records privacy consent only at a version the request named", 
 
   it("does not take agreement to product news as acceptance of a changed Privacy notice", async () => {
     await withServerVersions({ privacy: BUMPED }, async () => {
-      await expectPrivacyRefusal(await signUp({ email: EMAIL, marketingOptIn: true }));
+      await expectPrivacyRefusal(await signUpNamingOneVersion({ marketingOptIn: true }));
     });
   });
 
   it("leaves an audit row for the refusal that names the code and nothing about the person", async () => {
     await withServerVersions({ privacy: BUMPED }, async () => {
-      await signUp({ email: EMAIL });
+      await signUpNamingOneVersion();
       const rows = await getDb().select().from(auditEvent);
       expect(rows.map((row) => [row.action, row.detail])).toEqual([
         ["registration_refused", { code: "PRIVACY_NOT_ACCEPTED" }],
@@ -184,7 +222,7 @@ describe("sign-up records privacy consent only at a version the request named", 
 
   it("takes the one version a request names for both documents while both hold that version", async () => {
     expect(CONSENT_VERSIONS.privacy).toBe(CONSENT_VERSIONS.terms);
-    expect((await signUp({ email: EMAIL })).status).toBe(200);
+    expect((await signUpNamingOneVersion()).status).toBe(200);
     expect(await consentLog()).toContain(`privacy:${CONSENT_VERSIONS.privacy}:true:signup`);
   });
 });

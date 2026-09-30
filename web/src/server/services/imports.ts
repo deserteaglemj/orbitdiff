@@ -210,6 +210,9 @@ export async function importExport(
           profileId: locked.id,
           kind: "derive_profile",
           dedupeKey: dedupeKey.derive(locked.id, nextRevision),
+          // The clock the worker claims by, not the database's: the run right after this
+          // import must find the job due even when the two clocks differ slightly.
+          runAfter: now,
         })
       ).job;
       const record: ImportReceivedRecord = {

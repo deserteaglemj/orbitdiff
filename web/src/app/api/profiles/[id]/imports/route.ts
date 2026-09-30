@@ -20,14 +20,16 @@ const AFTER_IMPORT_BUDGET_MS = 20_000;
 /**
  * Process the job this import queued, after the response has been sent, so
  * the user does not wait for the hourly run. It runs at most one job, only for
- * this profile, and only while the day's job capacity allows. It processes
- * stored rows and contacts nothing. A failure here is logged and the job stays
- * in the queue for the next run.
+ * this profile, only of the kind an import queues, and only while the day's
+ * job capacity allows. A review of the same profile that was queued earlier is
+ * left for the hourly run, so it cannot take the place of the import. It
+ * processes stored rows and contacts nothing. A failure here is logged and the
+ * job stays in the queue for the next run.
  */
 async function processQueuedImport(profileId: string): Promise<void> {
   const now = new Date();
   if ((await readJobCapacity(now)).paused) return;
-  await drainJobs({ now, limit: 1, profileId, budgetMs: AFTER_IMPORT_BUDGET_MS });
+  await drainJobs({ now, limit: 1, profileId, kinds: ["derive_profile"], budgetMs: AFTER_IMPORT_BUDGET_MS });
 }
 
 /**

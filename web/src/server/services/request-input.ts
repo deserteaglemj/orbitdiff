@@ -22,7 +22,12 @@ export const updateMeBody = z.strictObject({
   reviewHour: z.number().optional(),
 });
 
-export const marketingConsentBody = z.strictObject({ granted: z.boolean() });
+/**
+ * The product news choice. `version` is only the shape here: the service
+ * requires a grant to name the current version and never reads the version of a
+ * withdrawal, so a withdrawal cannot be refused for what it carries there.
+ */
+export const marketingConsentBody = z.strictObject({ granted: z.boolean(), version: z.unknown().optional() });
 
 /**
  * The versions of the Terms and the Privacy notice that the page showed. Both

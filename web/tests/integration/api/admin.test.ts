@@ -137,6 +137,12 @@ describe("GET /api/admin/users", () => {
     const owner = await createVerifiedUser({ email: OWNER });
     await expectError(await users(owner.cookie, query), 422, "invalid_input");
   });
+
+  it("answers 422 naming q for a search text with a NUL byte, not a server error", async () => {
+    const owner = await createVerifiedUser({ email: OWNER });
+    const body = await expectError(await users(owner.cookie, "?q=atlas%00"), 422, "invalid_input");
+    expect(body.error.details).toEqual({ fields: ["q"] });
+  });
 });
 
 describe("GET /api/admin/capacity", () => {

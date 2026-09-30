@@ -13,8 +13,41 @@ export const DASHBOARD_PATH = "/dashboard";
 export const ONBOARDING_PATH = "/onboarding";
 export const VERIFY_EMAIL_PATH = "/verify-email";
 
-/** Request header the proxy sets to the requested path, replacing whatever the client sent. */
+/**
+ * Request header the proxy sets to the requested path. On a request the proxy
+ * runs on, it replaces whatever the client sent. On a request the proxy does
+ * not run on, the header still holds the client's own value: read it through
+ * requestedPathname(), never directly.
+ */
 export const PATHNAME_HEADER = "x-orbitdiff-pathname";
+
+/** Request header the proxy sets to the nonce of the policy it sends with the page. */
+export const NONCE_HEADER = "x-nonce";
+
+const POLICY_HEADER = "content-security-policy";
+
+/**
+ * The path the proxy reported for this request, or null.
+ *
+ * The path header is read only on a request that carries the proxy's other
+ * marks as well: the nonce, and the policy that names that nonce. The proxy
+ * sets the three together. A request that lacks them did not come through the
+ * proxy, so its path header is whatever the client chose, and the answer is
+ * null. The signed-in layout treats null as any page other than onboarding.
+ *
+ * This is a second line, not a proof: a client that reached a page without
+ * passing the proxy could send all three headers itself. What prevents that is
+ * the matcher in src/proxy.ts, which runs the proxy on every page path, and the
+ * pages, which call the guards themselves before loading data.
+ */
+export function requestedPathname(headers: Pick<Headers, "get">): string | null {
+  const nonce = headers.get(NONCE_HEADER);
+  if (typeof nonce !== "string" || nonce.length === 0) return null;
+  const policy = headers.get(POLICY_HEADER);
+  if (typeof policy !== "string" || !policy.includes(`'nonce-${nonce}'`)) return null;
+  const pathname = headers.get(PATHNAME_HEADER);
+  return typeof pathname === "string" && pathname.length > 0 ? pathname : null;
+}
 
 /** Areas that need a login. The proxy redirects a visitor without a session cookie away from them. */
 export const PROTECTED_PREFIXES = ["/dashboard", "/profiles", "/settings", "/onboarding", "/admin"] as const;

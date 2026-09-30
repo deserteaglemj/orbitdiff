@@ -5,11 +5,11 @@ import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-or
 import { isDomainError } from "@/domain/errors";
 import { LIMITS } from "@/domain/limits";
 import { type Executor, getDb } from "@/server/db/client";
-import { activityEntry, job, profile, usageDaily, user } from "@/server/db/schema";
+import { activityEntry, job, profile, user } from "@/server/db/schema";
 import { logError } from "@/server/http/log";
 import type { JobKind } from "@/server/services/contracts";
-import { GLOBAL_SCOPE, utcDay } from "@/server/services/usage";
 
+import { reserveJobStarts } from "./capacity";
 import { type JobRow, REVIEW_KINDS } from "./queue";
 
 export type ProfileRow = typeof profile.$inferSelect;
@@ -63,26 +63,46 @@ export interface ClaimInput {
   limit: number;
   /** Only claim jobs of this profile. */
   profileId?: string;
+  /** Only claim jobs of these kinds. Defaults to every kind. */
+  kinds?: readonly JobKind[];
 }
 
 /**
  * Take due queued jobs for this worker. Rows another worker is claiming are skipped, not
  * waited for, so two callers never receive the same job. Each claimed job gets a fresh lock
- * token and a lease; only the holder of that token may complete or fail it. A job counts
- * toward the day's total once, on its first claim.
+ * token and a lease; only the holder of that token may complete or fail it.
+ *
+ * The daily job capacity is enforced here, where the count is written. A job counts toward
+ * the day's total once, on its first claim, and a first claim is only made while the day has
+ * room for it: the count is locked, read and raised in this same transaction, so overlapping
+ * claims together never pass the capacity. Once the day's count has reached the capacity
+ * nothing is claimed. A job that is claimed again after a failed attempt was already counted.
  */
 export async function claimJobs(input: ClaimInput): Promise<JobRow[]> {
   if (input.limit < 1) return [];
   return getDb().transaction(async (tx) => {
     const conditions = [eq(job.status, "queued"), lte(job.runAfter, input.now)];
     if (input.profileId) conditions.push(eq(job.profileId, input.profileId));
-    const due = await tx
+    if (input.kinds) conditions.push(inArray(job.kind, [...input.kinds]));
+    const candidates = await tx
       .select({ id: job.id, attempts: job.attempts })
       .from(job)
       .where(and(...conditions))
       .orderBy(asc(job.runAfter), asc(job.createdAt), asc(job.id))
       .limit(input.limit)
       .for("update", { skipLocked: true });
+    if (candidates.length === 0) return [];
+    const firstTime = candidates.filter((row) => row.attempts === 0).length;
+    const capacity = await reserveJobStarts(tx, input.now, firstTime);
+    if (capacity.exhausted) return [];
+    // In queue order: every job that was counted before, and first-time jobs while room is left.
+    let room = capacity.granted;
+    const due = candidates.filter((row) => {
+      if (row.attempts > 0) return true;
+      if (room < 1) return false;
+      room -= 1;
+      return true;
+    });
     if (due.length === 0) return [];
     const claimed = await tx
       .update(job)
@@ -100,16 +120,6 @@ export async function claimJobs(input: ClaimInput): Promise<JobRow[]> {
         ),
       )
       .returning();
-    const firstClaims = due.filter((row) => row.attempts === 0).length;
-    if (firstClaims > 0) {
-      await tx
-        .insert(usageDaily)
-        .values({ day: utcDay(input.now), scopeKey: GLOBAL_SCOPE, jobs: firstClaims })
-        .onConflictDoUpdate({
-          target: [usageDaily.day, usageDaily.scopeKey],
-          set: { jobs: sql`${usageDaily.jobs} + excluded.jobs` },
-        });
-    }
     const order = new Map(due.map((row, index) => [row.id, index]));
     return claimed.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   });

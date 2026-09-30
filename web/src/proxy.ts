@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { hasSessionCookie, PATHNAME_HEADER, signInRedirect } from "@/server/auth/paths";
+import { hasSessionCookie, NONCE_HEADER, PATHNAME_HEADER, signInRedirect } from "@/server/auth/paths";
 import { createNonce, securityHeaders } from "@/server/auth/security-headers";
 
 /**
@@ -15,8 +15,11 @@ import { createNonce, securityHeaders } from "@/server/auth/security-headers";
  *    may see what is decided by the guards (src/server/auth/guards.ts), which
  *    read the session from the database.
  * 3. The requested path, handed to the page as a request header, so the
- *    signed-in layout knows which page it is guarding. The value a client sends
- *    in that header is always replaced.
+ *    signed-in layout knows which page it is guarding. On every request this
+ *    function runs on, the value a client sent in that header is replaced. It
+ *    runs on every page path (see the matcher below); the layout ignores the
+ *    header on a request that did not come through here (requestedPathname in
+ *    src/server/auth/paths.ts).
  */
 export function proxy(request: NextRequest): NextResponse {
   const { pathname, search, protocol } = request.nextUrl;
@@ -35,7 +38,7 @@ export function proxy(request: NextRequest): NextResponse {
     response = NextResponse.redirect(new URL(destination, request.nextUrl.origin));
   } else {
     const forwarded = new Headers(request.headers);
-    forwarded.set("x-nonce", nonce);
+    forwarded.set(NONCE_HEADER, nonce);
     forwarded.set(PATHNAME_HEADER, pathname);
     for (const [name, value] of headers) {
       if (name === "Content-Security-Policy") forwarded.set(name, value);
@@ -49,10 +52,22 @@ export function proxy(request: NextRequest): NextResponse {
 export const config = {
   matcher: [
     /*
-     * Every path except API routes, the build output, the image optimizer, and
-     * files served from public/. Those are not pages: next.config.ts gives them
-     * the fixed security headers.
+     * Every path except exactly these, which are not pages and get the fixed
+     * security headers from next.config.ts:
+     *
+     * - /api and everything under it;
+     * - the build output, /_next/static/<file>;
+     * - the image optimizer, /_next/image;
+     * - a file name at the root, as files from public/ are served:
+     *   /favicon.ico, /robots.txt. One path segment only.
+     *
+     * A path that only resembles one of them is a page and runs through here:
+     * /profiles/abc.png (an extension in a deeper segment), /_next/staticfoo,
+     * /_next/image/extra. The rules in next.config.ts name the same four sets,
+     * so every path gets exactly one policy. tests/unit/server/proxy.test.ts
+     * checks both halves against each other. The value has to stay a literal:
+     * Next.js reads it at build time.
      */
-    "/((?!api/|api$|_next/static|_next/image|.*\\.svg$|.*\\.png$|.*\\.ico$|.*\\.txt$|.*\\.xml$).*)",
+    "/((?!api/|api$|_next/static/.|_next/image/?$|[^/]+\\.(?:svg|png|ico|txt|xml)/?$).*)",
   ],
 };

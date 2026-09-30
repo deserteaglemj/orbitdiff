@@ -15,9 +15,18 @@ export const metadata: Metadata = {
  * confirmation link returned here with `step=opened`), and invalid (it returned
  * with `error=<code>`). Opening the link verifies nothing by itself: the server
  * leaves a proof in this browser and the next sign-in completes it.
+ *
+ * On a deployment that is not configured the screen shows a notice in place of
+ * all three, as the sign-in, sign-up, and forgot-password pages do.
  */
 export default async function VerifyEmailPage({ searchParams }: { searchParams: PageQuery }) {
   const query = await searchParams;
   const registration = await readPublicRegistration();
-  return <VerifyEmailScreen state={verifyPageState(query)} mailCaptured={registration.mailCaptured} />;
+  return (
+    <VerifyEmailScreen
+      configured={registration.configured}
+      state={verifyPageState(query)}
+      mailCaptured={registration.mailCaptured}
+    />
+  );
 }

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { resolvePageAccess } from "@/server/auth/page-access";
-import { hasSessionCookie } from "@/server/auth/paths";
+import { hasSessionCookie, PATHNAME_HEADER, requestedPathname } from "@/server/auth/paths";
 import { closeDb, getDb } from "@/server/db/client";
 import { consentRecord, session, user } from "@/server/db/schema";
 
@@ -75,6 +75,16 @@ describe("resolvePageAccess: what the signed-in layout does with a request", () 
       onboarded: false,
       isAdmin: false,
       user: { id: member.userId, email: MEMBER, name: "Nova" },
+    });
+  });
+
+  it("does not take the client's word for which page it is when the request did not come through the proxy", async () => {
+    const member = await createVerifiedUser({ email: MEMBER });
+    // A request the proxy never saw: no nonce, no policy, and a path header the client wrote itself.
+    const forged = new Headers({ cookie: member.cookie, [PATHNAME_HEADER]: "/onboarding" });
+    expect(await resolvePageAccess(forged, requestedPathname(forged))).toEqual({
+      kind: "redirect",
+      to: "/onboarding",
     });
   });
 

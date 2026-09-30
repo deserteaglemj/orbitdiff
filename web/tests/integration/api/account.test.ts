@@ -2,13 +2,14 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { GET } from "@/app/api/account/export/route";
+import { recordAuthEvent } from "@/server/auth/audit";
 import { closeDb, getDb } from "@/server/db/client";
-import { account, session } from "@/server/db/schema";
+import { account, auditEvent, session } from "@/server/db/schema";
 import { importExport } from "@/server/services/imports";
 import { createProfile } from "@/server/services/profiles";
 
 import { callRoute, createVerifiedUser, resetDatabase, restoreTestEnv } from "../../helpers";
-import { ATLAS, exportPayload, roster } from "../services/support";
+import { ATLAS, exportPayload, NOVA, roster } from "../services/support";
 import { expectError } from "./support";
 
 beforeEach(resetDatabase);
@@ -63,6 +64,44 @@ describe("GET /api/account/export", () => {
     expect(text).not.toContain(credential!.password!);
     expect(text).not.toContain(signedIn!.token);
     expect(text).not.toMatch(/"(password|token)"/);
+  });
+
+  it("includes the user's own security events, and nobody else's", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
+    const nova = await createVerifiedUser({ email: NOVA, onboarded: true });
+    await getDb().insert(auditEvent).values([
+      { action: "password_reset_completed", actorUserId: atlas.userId, at: new Date("2026-09-29T08:00:00.000Z") },
+      { action: "password_reset_completed", actorUserId: atlas.userId, at: new Date("2026-09-30T08:00:00.000Z") },
+      { action: "password_reset_completed", actorUserId: nova.userId, at: new Date("2026-09-30T09:00:00.000Z") },
+      { action: "registration_refused", detail: { code: "TERMS_NOT_ACCEPTED" }, at: new Date("2026-09-30T10:00:00.000Z") },
+    ]);
+
+    const body = await (await get(atlas.cookie)).json();
+
+    expect(body.securityEvents).toEqual([
+      { action: "password_reset_completed", at: "2026-09-29T08:00:00.000Z", detail: null },
+      { action: "password_reset_completed", at: "2026-09-30T08:00:00.000Z", detail: null },
+    ]);
+    const others = await (await get(nova.cookie)).json();
+    expect(others.securityEvents).toEqual([
+      { action: "password_reset_completed", at: "2026-09-30T09:00:00.000Z", detail: null },
+    ]);
+  });
+
+  it("records a completed password reset where the export shows it", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
+    await recordAuthEvent("password_reset_completed", { actorUserId: atlas.userId });
+
+    const body = await (await get(atlas.cookie)).json();
+
+    expect(body.securityEvents).toHaveLength(1);
+    expect(body.securityEvents[0]).toMatchObject({ action: "password_reset_completed", detail: null });
+    expect(Object.keys(body.securityEvents[0]).sort()).toEqual(["action", "at", "detail"]);
+  });
+
+  it("lists no security event for an account that has none", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    expect((await (await get(atlas.cookie)).json()).securityEvents).toEqual([]);
   });
 
   it("is available before onboarding, so a user can always take their data", async () => {

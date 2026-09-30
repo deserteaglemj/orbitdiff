@@ -9,9 +9,17 @@ import { POST as profilesPOST } from "@/app/api/profiles/route";
 import { describeAuthError, verifyPageState } from "@/components/auth/auth-errors";
 import { buildSignUpRequest, VERIFY_CALLBACK_PATH, type SignUpValues } from "@/components/auth/sign-up-model";
 import { describeApiFailure } from "@/components/onboarding/api";
-import { buildOnboardingBody, consentToConfirm, initialStep, validateDetails } from "@/components/onboarding/model";
+import {
+  buildOnboardingBody,
+  consentToConfirm,
+  initialStep,
+  isReturning,
+  onboardingAccount,
+  stepAfterAgreement,
+  validateDetails,
+} from "@/components/onboarding/model";
 import { CONSENT_VERSIONS } from "@/domain/limits";
-import { requireOnboardedUser } from "@/server/auth/guards";
+import { getSessionUser, requireOnboardedUser } from "@/server/auth/guards";
 import { handleAuthRequest } from "@/server/auth/handler";
 import { authSchemaOptions } from "@/server/auth/options";
 import { afterSignInPath } from "@/server/auth/paths";
@@ -352,10 +360,79 @@ describe("the onboarding flow against the real routes", () => {
 
   const me = async (cookie: string) => (await (await callRoute(meGET, { url: "/api/me", cookie })).json()) as MeDto;
 
+  /** The account as the onboarding page hands it to the flow: the user's own record and the session's onboarded_at. */
+  async function standing(cookie: string) {
+    const current = await getSessionUser(new Headers({ cookie }));
+    if (!current) throw new Error("expected a signed-in user");
+    return onboardingAccount(await me(cookie), current.onboardedAt);
+  }
+
+  const agree = async (cookie: string, needed: ReturnType<typeof consentToConfirm>) => {
+    const body = buildOnboardingBody({ needed, ticked: { terms: true, privacy: true }, versions: shown() });
+    if (!body.ok) throw new Error("expected a body");
+    return callRoute(onboardingPOST, { method: "POST", url: "/api/me/onboarding", cookie, json: body.body });
+  };
+
+  const addProfile = (cookie: string, handle: string) =>
+    callRoute(profilesPOST, { method: "POST", url: "/api/profiles", cookie, json: { handle } });
+
+  /** Run while a document holds another version, as after a deploy that changed its text. */
+  async function afterDocumentChange<T>(bump: Partial<Record<"terms" | "privacy", string>>, run: () => Promise<T>): Promise<T> {
+    const versions = CONSENT_VERSIONS as unknown as Record<string, string>;
+    const before = { ...versions };
+    Object.assign(versions, bump);
+    try {
+      return await run();
+    } finally {
+      Object.assign(versions, before);
+    }
+  }
+
+  it.each([
+    ["one profile", ["atlas_studio"]],
+    ["the maximum of three profiles", ["atlas_studio", "nova_labs", "pixel_forge"]],
+  ])("asks a returning user with %s only for the agreement, then is done", async (_label, handles) => {
+    const cookie = await signedIn();
+    expect((await agree(cookie, [])).status).toBe(200);
+    for (const handle of handles) expect((await addProfile(cookie, handle)).status).toBe(201);
+    expect(initialStep(await standing(cookie))).toBe("done");
+
+    await afterDocumentChange({ terms: "2099-01-01" }, async () => {
+      // The guard sends the user back to onboarding: consent is no longer current.
+      await expect(requireOnboardedUser(new Headers({ cookie }))).rejects.toMatchObject({ details: { onboarding: true } });
+      const account = await standing(cookie);
+      expect(account).toMatchObject({ onboarded: false, completedBefore: true, profiles: handles.length });
+      expect(isReturning(account)).toBe(true);
+      expect(initialStep(account)).toBe("consent");
+
+      const needed = consentToConfirm(account.consent, shown());
+      expect(needed).toEqual(["terms"]);
+      expect((await agree(cookie, needed)).status).toBe(200);
+
+      // Not "add your first profile": the account has profiles, and with three it could not add one.
+      expect(stepAfterAgreement(account)).toBe("done");
+      expect((await requireOnboardedUser(new Headers({ cookie }))).email).toBe(EMAIL);
+      expect((await standing(cookie)).profiles).toBe(handles.length);
+    });
+  });
+
+  it("asks a returning user who never added a profile for the agreement, then for a first profile", async () => {
+    const cookie = await signedIn();
+    expect((await agree(cookie, [])).status).toBe(200);
+
+    await afterDocumentChange({ privacy: "2099-01-01" }, async () => {
+      const account = await standing(cookie);
+      expect(account).toMatchObject({ onboarded: false, completedBefore: true, profiles: 0 });
+      expect(initialStep(account)).toBe("consent");
+      expect((await agree(cookie, consentToConfirm(account.consent, shown()))).status).toBe(200);
+      expect(stepAfterAgreement(account)).toBe("profile");
+    });
+  });
+
   it("walks the three steps: details, agreement, first profile", async () => {
     const cookie = await signedIn();
-    const start = await me(cookie);
-    expect(initialStep({ onboarded: start.onboarded, profiles: start.usage.profiles })).toBe("details");
+    expect(await standing(cookie)).toMatchObject({ onboarded: false, completedBefore: false });
+    expect(initialStep(await standing(cookie))).toBe("details");
 
     const details = validateDetails({ name: "Atlas Studio", timezone: "America/Chicago", reviewHour: "7" });
     expect(details.ok).toBe(true);
@@ -374,7 +451,8 @@ describe("the onboarding flow against the real routes", () => {
     expect(accepted.status).toBe(200);
     const after = (await accepted.json()) as MeDto;
     expect(after.onboarded).toBe(true);
-    expect(initialStep({ onboarded: after.onboarded, profiles: after.usage.profiles })).toBe("profile");
+    expect(stepAfterAgreement({ profiles: after.usage.profiles })).toBe("profile");
+    expect(initialStep(await standing(cookie))).toBe("profile");
     expect((await requireOnboardedUser(new Headers({ cookie }))).email).toBe(EMAIL);
 
     const added = await callRoute(profilesPOST, {
@@ -385,8 +463,7 @@ describe("the onboarding flow against the real routes", () => {
     });
     expect(added.status).toBe(201);
     expect((await added.json()).handle).toBe("atlas_studio");
-    const done = await me(cookie);
-    expect(initialStep({ onboarded: done.onboarded, profiles: done.usage.profiles })).toBe("done");
+    expect(initialStep(await standing(cookie))).toBe("done");
   });
 
   it("asks for both boxes when the recorded consent is outdated, and refuses until they are ticked", async () => {

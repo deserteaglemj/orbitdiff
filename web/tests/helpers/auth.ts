@@ -59,6 +59,12 @@ export interface SignUpInput {
   marketingOptIn?: boolean;
   /** Defaults to the current terms version. Pass null to leave it out of the request. */
   acceptedTermsVersion?: string | null;
+  /**
+   * Defaults to the current privacy version, as the sign-up screen sends it.
+   * Pass null to leave it out of the request, so the one version named for the
+   * Terms stands for both documents. A value in `extra` takes precedence.
+   */
+  acceptedPrivacyVersion?: string | null;
   /** Extra request headers, for example { "x-signup-code": "..." }. */
   headers?: Record<string, string>;
   /** Extra body fields, to prove that a client cannot set them. */
@@ -77,6 +83,9 @@ export async function signUp(input: SignUpInput): Promise<Response> {
   if (input.timezone !== null) body.timezone = input.timezone ?? "UTC";
   if (input.acceptedTermsVersion !== null) {
     body.acceptedTermsVersion = input.acceptedTermsVersion ?? CONSENT_VERSIONS.terms;
+  }
+  if (input.acceptedPrivacyVersion !== null && !Object.hasOwn(body, "acceptedPrivacyVersion")) {
+    body.acceptedPrivacyVersion = input.acceptedPrivacyVersion ?? CONSENT_VERSIONS.privacy;
   }
   if (input.marketingOptIn !== undefined) body.marketingOptIn = input.marketingOptIn;
   return authRequest("/sign-up/email", { json: body, headers: input.headers, auth: input.auth });

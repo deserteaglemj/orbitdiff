@@ -369,9 +369,13 @@ describe("completeOnboarding", () => {
 });
 
 describe("recordMarketingConsent", () => {
+  /** A grant as the settings page sends it: it names the version of the product news consent it showed. */
+  const GRANT = { granted: true, version: CONSENT_VERSIONS.marketing } as const;
+  const WITHDRAW = { granted: false } as const;
+
   it("appends a granted marketing row from settings", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
-    const state = await recordMarketingConsent(atlas.userId, true, NOW);
+    const state = await recordMarketingConsent(atlas.userId, GRANT, NOW);
     expect(state.marketing).toMatchObject({ granted: true, version: CONSENT_VERSIONS.marketing });
     const rows = await consentRows(atlas.userId, "marketing");
     expect(rows).toHaveLength(2);
@@ -381,8 +385,8 @@ describe("recordMarketingConsent", () => {
 
   it("withdraws by appending, never by editing the log", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
-    await recordMarketingConsent(atlas.userId, true, NOW);
-    const state = await recordMarketingConsent(atlas.userId, false, NOW);
+    await recordMarketingConsent(atlas.userId, GRANT, NOW);
+    const state = await recordMarketingConsent(atlas.userId, WITHDRAW, NOW);
     expect(state.marketing?.granted).toBe(false);
     const rows = await consentRows(atlas.userId, "marketing");
     expect(rows.map((row) => row.granted).sort()).toEqual([false, false, true]);
@@ -392,8 +396,8 @@ describe("recordMarketingConsent", () => {
   it("does not affect terms or privacy consent when marketing is withdrawn", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
     const before = [...(await consentRows(atlas.userId, "terms")), ...(await consentRows(atlas.userId, "privacy"))];
-    await recordMarketingConsent(atlas.userId, true, NOW);
-    await recordMarketingConsent(atlas.userId, false, NOW);
+    await recordMarketingConsent(atlas.userId, GRANT, NOW);
+    await recordMarketingConsent(atlas.userId, WITHDRAW, NOW);
     const after = [...(await consentRows(atlas.userId, "terms")), ...(await consentRows(atlas.userId, "privacy"))];
     expect(after).toEqual(before);
     expect(await hasCurrentConsent(atlas.userId)).toBe(true);
@@ -405,6 +409,14 @@ describe("recordMarketingConsent", () => {
     const error = await thrown(() => recordMarketingConsent(atlas.userId, "yes" as never, NOW));
     expect(error.code).toBe("invalid_input");
     expect(await consentRows(atlas.userId, "marketing")).toHaveLength(1);
+  });
+
+  it("rejects a grant that names no version, and records nothing", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, onboarded: true });
+    const error = await thrown(() => recordMarketingConsent(atlas.userId, { granted: true } as never, NOW));
+    expect(error).toMatchObject({ code: "invalid_input", details: { fields: ["version"] } });
+    expect(await consentRows(atlas.userId, "marketing")).toHaveLength(1);
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(false);
   });
 });
 
@@ -572,7 +584,7 @@ describe("exportAccount", () => {
     );
     await insertEvents(atlas.userId, created.id, [{ type: "follower_observed_added", username: "ember_lab" }]);
     await markDerived(created.id);
-    await recordMarketingConsent(atlas.userId, true, NOW);
+    await recordMarketingConsent(atlas.userId, { granted: true, version: CONSENT_VERSIONS.marketing }, NOW);
     return { atlas, profileId: created.id };
   }
 

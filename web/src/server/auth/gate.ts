@@ -8,6 +8,7 @@ import { isValidTimezone } from "@/domain/schedule";
 import { getEnv } from "@/server/env";
 import { constantTimeEqual } from "@/server/http/compare";
 import { mailDelivery } from "@/server/mail/transport";
+import { hasControlCharacter } from "@/server/services/shared";
 
 import { ADDRESS_RULES, consumeAddressLimit } from "./address-limit";
 import { recordAuthEvent } from "./audit";
@@ -91,11 +92,24 @@ function assertOnlyKeys(body: Body, allowed: ReadonlySet<string>): void {
   }
 }
 
+/**
+ * The name rule for both Better Auth paths that write it (sign-up and
+ * update-user). Better Auth stores the name exactly as sent, so a control
+ * character anywhere in it is refused here, the same rule PATCH /api/me
+ * applies: Postgres cannot store U+0000 at all, and a line break does not
+ * belong in a name. No message repeats what was sent.
+ */
 function assertName(name: unknown): void {
   if (typeof name !== "string" || name.trim().length === 0 || name.length > NAME_MAX) {
     throw new APIError("UNPROCESSABLE_ENTITY", {
       code: "INVALID_NAME",
       message: `Enter a name of 1 to ${NAME_MAX} characters.`,
+    });
+  }
+  if (hasControlCharacter(name)) {
+    throw new APIError("UNPROCESSABLE_ENTITY", {
+      code: "INVALID_NAME",
+      message: "The name must not contain control characters such as line breaks.",
     });
   }
 }

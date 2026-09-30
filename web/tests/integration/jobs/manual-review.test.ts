@@ -5,8 +5,10 @@ import { POST } from "@/app/api/profiles/[id]/review/route";
 import { LIMITS } from "@/domain/limits";
 import { closeDb, getDb } from "@/server/db/client";
 import { job, usageDaily, user } from "@/server/db/schema";
+import { AppError } from "@/server/http/errors";
 import { runTick } from "@/server/jobs/tick";
 import type { JobDto } from "@/server/services/contracts";
+import { countManualReview } from "@/server/services/usage";
 
 import { callRoute, createVerifiedUser, resetDatabase, restoreTestEnv, setTestEnv } from "../../helpers";
 import { activityOf, jobsOf, type Owner, ownerWithProfile, profileRow } from "./support";
@@ -221,6 +223,60 @@ describe("POST /api/profiles/:id/review", () => {
     const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
 
     expect((await review(owner.profileId, { cookie: owner.cookie, json: {} })).status).toBe(202);
+  });
+
+  describe("countManualReview: the counter is written through the owner's id", () => {
+    const NOW = new Date("2026-09-30T12:00:00.000Z");
+    const usageOf = (profileId: string) =>
+      getDb().select().from(usageDaily).where(eq(usageDaily.scopeKey, `profile:${profileId}`));
+    const codeOf = async (run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof AppError) return error.code;
+        throw error;
+      }
+      return "no error";
+    };
+
+    it("counts one review of the owner's own profile for the day", async () => {
+      const atlas = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+
+      expect(await countManualReview(atlas.userId, atlas.profileId, NOW)).toBe(1);
+      expect(await countManualReview(atlas.userId, atlas.profileId, NOW)).toBe(2);
+
+      expect(await usageOf(atlas.profileId)).toMatchObject([{ day: "2026-09-30", manualReviews: 2 }]);
+    });
+
+    it("answers not_found and counts nothing for a profile of another user", async () => {
+      const atlas = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+      const nova = await createVerifiedUser({ email: "nova@orbitdiff.test", onboarded: true });
+
+      expect(await codeOf(() => countManualReview(nova.userId, atlas.profileId, NOW))).toBe("not_found");
+
+      expect(await usageOf(atlas.profileId)).toEqual([]);
+    });
+
+    it("gives the same not_found for an id that does not exist and for a malformed id", async () => {
+      const atlas = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+      const missing = "3f2b8c1e-5a4d-4e6f-9b7a-0c1d2e3f4a5b";
+
+      expect(await codeOf(() => countManualReview(atlas.userId, missing, NOW))).toBe("not_found");
+      expect(await codeOf(() => countManualReview(atlas.userId, "nope", NOW))).toBe("not_found");
+
+      expect(await getDb().select().from(usageDaily)).toEqual([]);
+    });
+
+    it("refuses with quota_exhausted at the daily limit and does not pass it", async () => {
+      const atlas = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+      for (let index = 0; index < LIMITS.manualReviewsPerProfilePerDay; index += 1) {
+        await countManualReview(atlas.userId, atlas.profileId, NOW);
+      }
+
+      expect(await codeOf(() => countManualReview(atlas.userId, atlas.profileId, NOW))).toBe("quota_exhausted");
+
+      expect(await usageOf(atlas.profileId)).toMatchObject([{ manualReviews: LIMITS.manualReviewsPerProfilePerDay }]);
+    });
   });
 
   it("does not let another user spend the cooldown or the daily limit of a profile", async () => {

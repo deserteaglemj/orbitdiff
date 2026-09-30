@@ -1,10 +1,12 @@
 import { LinkButton, Notice, SectionHeading } from "@/components/ui";
 
 import type { VerifyPageState } from "./auth-errors";
-import { AuthFrame, CapturedMailNotice } from "./auth-parts";
+import { AuthFrame, CapturedMailNotice, NotConfiguredNotice } from "./auth-parts";
 import { EmailRequestForm } from "./email-request-form";
 
 export interface VerifyEmailScreenProps {
+  /** From readPublicRegistration(). The steps and the form are shown only for exactly `true`. */
+  configured: boolean;
   /** `waiting` after sign-up, `opened` when the link returned here, `invalid` when it did not work. */
   state: VerifyPageState;
   mailCaptured: boolean;
@@ -29,8 +31,20 @@ function NewMessage({ mailCaptured }: { mailCaptured: boolean }) {
  * The confirm-your-address page. The link in the confirmation message proves
  * nothing by itself: it leaves a proof in this browser, and the address is
  * confirmed by the first sign-in with the right password from here.
+ *
+ * A deployment that lacks its configuration has no accounts, so in every state
+ * the page shows the notice and nothing else: no claim that an account was
+ * created, and no form whose request could not succeed.
  */
-export function VerifyEmailScreen({ state, mailCaptured }: VerifyEmailScreenProps) {
+export function VerifyEmailScreen({ configured, state, mailCaptured }: VerifyEmailScreenProps) {
+  if (configured !== true) {
+    return (
+      <AuthFrame title="Confirm your email address">
+        <NotConfiguredNotice action="Confirming an email address" />
+      </AuthFrame>
+    );
+  }
+
   if (state === "opened") {
     return (
       <AuthFrame

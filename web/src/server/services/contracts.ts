@@ -236,6 +236,16 @@ export interface OnboardingRequestDto {
   privacyVersion: string;
 }
 
+/**
+ * Body of POST /api/me/consent: the product news choice.
+ *
+ * A grant names the version of the product news consent the page showed. The
+ * server records a grant only when that is the current version, compared in
+ * full, and records it at the version named. A withdrawal needs no version and
+ * is never refused because of one: `{ "granted": false }` always works.
+ */
+export type MarketingConsentRequestDto = { granted: true; version: string } | { granted: false; version?: unknown };
+
 export interface MeDto {
   id: string;
   email: string;

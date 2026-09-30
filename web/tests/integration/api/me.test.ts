@@ -85,6 +85,25 @@ describe("PATCH /api/me", () => {
     expect(me).toMatchObject({ name: "Atlas", isAdmin: false, onboarded: false });
   });
 
+  it.each([
+    ["a NUL byte", "Atlas\u0000Studio"],
+    ["only a NUL byte", "\u0000"],
+    ["a line break inside it", "Atlas\nStudio"],
+    ["an escape character", "\u001bAtlas"],
+  ])("rejects a name with %s as invalid input naming the field, and changes nothing", async (_label, name) => {
+    const atlas = await createVerifiedUser({ email: ATLAS, name: "Atlas" });
+    const body = await expectError(await patch(atlas.cookie, { name }), 422, "invalid_input");
+    expect(body.error.details).toEqual({ fields: ["name"] });
+    expect((await userRow(atlas.userId)).name).toBe("Atlas");
+  });
+
+  it("still accepts a name with letters outside ASCII and spaces inside it", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS, name: "Atlas" });
+    const response = await patch(atlas.cookie, { name: "  Zoë Åström 工作室  " });
+    expect(response.status).toBe(200);
+    expect((await userRow(atlas.userId)).name).toBe("Zoë Åström 工作室");
+  });
+
   it("rejects a review hour out of range", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS });
     await expectError(await patch(atlas.cookie, { reviewHour: 24 }), 422, "invalid_input");
@@ -140,27 +159,162 @@ describe("POST /api/me/consent", () => {
   const post = (cookie: string | undefined, json: unknown, origin?: string | null) =>
     callRoute(consentPOST, { method: "POST", url: "/api/me/consent", cookie, json, origin });
 
-  it("records a marketing consent change", async () => {
+  /** What the settings page sends for "on": the version of the product news consent it showed. */
+  const grant = () => ({ granted: true, version: CONSENT_VERSIONS.marketing });
+  const BUMPED = "2026-12-01";
+  /** The marketing rows of one user as version:granted:source, sorted. */
+  const marketingLog = async (userId: string) =>
+    (await consentRows(userId))
+      .filter((row) => row.kind === "marketing")
+      .map((row) => `${row.version}:${row.granted}:${row.source}`)
+      .sort();
+
+  /** A grant that must be refused: 422 naming `version`, and nothing recorded or switched on. */
+  async function grantRefused(json: unknown): Promise<string> {
     const atlas = await createVerifiedUser({ email: ATLAS });
-    const response = await post(atlas.cookie, { granted: true });
+    const before = await consentRows(atlas.userId);
+    const response = await post(atlas.cookie, json);
+    const text = await response.clone().text();
+    const refusal = await expectError(response, 422, "invalid_input");
+    expect(refusal.error.details).toEqual({ fields: ["version"] });
+    expect(await consentRows(atlas.userId)).toEqual(before);
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(false);
+    return text;
+  }
+
+  it("records a grant that names the current version, at the version it named", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    const response = await post(atlas.cookie, grant());
     expect(response.status).toBe(200);
     expect((await response.json()).marketing).toMatchObject({ granted: true, version: CONSENT_VERSIONS.marketing });
-    const rows = await getDb()
-      .select()
-      .from(consentRecord)
-      .where(and(eq(consentRecord.userId, atlas.userId), eq(consentRecord.kind, "marketing")));
-    expect(rows.map((row) => row.source).sort()).toEqual(["settings", "signup"]);
+    expect(await marketingLog(atlas.userId)).toEqual([
+      `${CONSENT_VERSIONS.marketing}:false:signup`,
+      `${CONSENT_VERSIONS.marketing}:true:settings`,
+    ]);
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(true);
+  });
+
+  it("refuses a grant that names no version", async () => {
+    await grantRefused({ granted: true });
+  });
+
+  it("refuses a grant with an empty version", async () => {
+    await grantRefused({ granted: true, version: "" });
+  });
+
+  it("refuses a grant with a fabricated version and does not repeat it", async () => {
+    const text = await grantRefused({ granted: true, version: "v999-made-up" });
+    expect(text).not.toContain("v999-made-up");
+  });
+
+  it("refuses a grant with an outdated version", async () => {
+    await grantRefused({ granted: true, version: "2020-01-01" });
+  });
+
+  it.each([
+    ["the boolean true", true],
+    ["a number", 20260930],
+    ["null", null],
+    ["a list", [CONSENT_VERSIONS.marketing]],
+    ["an object", { version: CONSENT_VERSIONS.marketing }],
+  ])("refuses a grant whose version is %s", async (_label, version) => {
+    await grantRefused({ granted: true, version });
+  });
+
+  it.each([
+    ["a leading space", ` ${CONSENT_VERSIONS.marketing}`],
+    ["a trailing space", `${CONSENT_VERSIONS.marketing} `],
+    ["a trailing line break", `${CONSENT_VERSIONS.marketing}\n`],
+    ["extra text after it", `${CONSENT_VERSIONS.marketing}-yes`],
+  ])("refuses a grant naming the current version with %s", async (_label, version) => {
+    await grantRefused({ granted: true, version });
+  });
+
+  it("never hands out the current version in a refusal", async () => {
+    await withDocumentVersions({ marketing: "2031-04-05" }, async () => {
+      const text = await grantRefused({ granted: true, version: "2020-01-01" });
+      expect(text).not.toContain("2031-04-05");
+    });
+  });
+
+  it("refuses the version an open page still holds after the product news text changed", async () => {
+    const stale = grant();
+    await withDocumentVersions({ marketing: BUMPED }, async () => {
+      await grantRefused(stale);
+    });
+  });
+
+  it("refuses the version of the Terms named as the product news version when the two differ", async () => {
+    await withDocumentVersions({ marketing: BUMPED }, async () => {
+      await grantRefused({ granted: true, version: CONSENT_VERSIONS.terms });
+    });
+  });
+
+  it("records the new version once the request names it", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    await withDocumentVersions({ marketing: BUMPED }, async () => {
+      const response = await post(atlas.cookie, { granted: true, version: BUMPED });
+      expect(response.status).toBe(200);
+      expect((await response.json()).marketing).toMatchObject({ granted: true, version: BUMPED });
+    });
+    expect(await marketingLog(atlas.userId)).toContain(`${BUMPED}:true:settings`);
+  });
+
+  it("records a withdrawal that names no version", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    expect((await post(atlas.cookie, grant())).status).toBe(200);
+    const response = await post(atlas.cookie, { granted: false });
+    expect(response.status).toBe(200);
+    expect((await response.json()).marketing).toMatchObject({ granted: false });
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(false);
+    expect(await marketingLog(atlas.userId)).toEqual([
+      `${CONSENT_VERSIONS.marketing}:false:settings`,
+      `${CONSENT_VERSIONS.marketing}:false:signup`,
+      `${CONSENT_VERSIONS.marketing}:true:settings`,
+    ]);
+  });
+
+  it.each([
+    ["an outdated version", "2020-01-01"],
+    ["an empty version", ""],
+    ["a version that is not text", 7],
+  ])("never refuses a withdrawal because it carries %s", async (_label, version) => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    expect((await post(atlas.cookie, grant())).status).toBe(200);
+    const response = await post(atlas.cookie, { granted: false, version });
+    expect(response.status).toBe(200);
+    expect((await response.json()).marketing).toMatchObject({ granted: false, version: CONSENT_VERSIONS.marketing });
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(false);
+  });
+
+  it("lets a page opened before the text changed still withdraw", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    expect((await post(atlas.cookie, grant())).status).toBe(200);
+    await withDocumentVersions({ marketing: BUMPED }, async () => {
+      expect((await post(atlas.cookie, { granted: false })).status).toBe(200);
+    });
+    expect((await userRow(atlas.userId)).marketingOptIn).toBe(false);
+  });
+
+  it("leaves terms and privacy consent alone when product news is granted", async () => {
+    const atlas = await createVerifiedUser({ email: ATLAS });
+    const required = async () => (await consentRows(atlas.userId)).filter((row) => row.kind !== "marketing");
+    const before = await required();
+    expect((await post(atlas.cookie, grant())).status).toBe(200);
+    expect(await required()).toEqual(before);
   });
 
   it("rejects a value that is not a boolean", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS });
-    await expectError(await post(atlas.cookie, { granted: "true" }), 422, "invalid_input");
+    const before = await consentRows(atlas.userId);
+    await expectError(await post(atlas.cookie, { granted: "true", version: CONSENT_VERSIONS.marketing }), 422, "invalid_input");
+    expect(await consentRows(atlas.userId)).toEqual(before);
   });
 
   it("rejects an attempt to record terms consent through this route", async () => {
     const atlas = await createVerifiedUser({ email: ATLAS });
     const before = await consentRows(atlas.userId);
-    await expectError(await post(atlas.cookie, { granted: true, kind: "terms" }), 422, "invalid_input");
+    await expectError(await post(atlas.cookie, { ...grant(), kind: "terms" }), 422, "invalid_input");
     expect(await consentRows(atlas.userId)).toEqual(before);
   });
 

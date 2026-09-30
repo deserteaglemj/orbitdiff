@@ -8,7 +8,7 @@ import { getDb } from "@/server/db/client";
 import { consentRecord, job, profile, user } from "@/server/db/schema";
 import { LAST_TICK_STATE_KEY } from "@/server/http/health";
 import { logError } from "@/server/http/log";
-import type { TickSummaryDto } from "@/server/services/contracts";
+import type { JobKind, TickSummaryDto } from "@/server/services/contracts";
 import { reviewTimeFor } from "@/server/services/profiles";
 import { utcDay } from "@/server/services/usage";
 
@@ -53,6 +53,8 @@ export interface DrainOptions {
   limit: number;
   /** Only run jobs of this profile: the opportunistic drain right after an import. */
   profileId?: string;
+  /** Only run jobs of these kinds. Defaults to every kind. */
+  kinds?: readonly JobKind[];
   handlers?: Partial<JobHandlers>;
   concurrency?: number;
   budgetMs?: number;
@@ -86,7 +88,12 @@ export async function drainJobs(options: DrainOptions): Promise<DrainSummary> {
     while (reserved < options.limit && performance.now() - started < budgetMs) {
       reserved += 1;
       try {
-        const [claim] = await claimJobs({ now: options.now, limit: 1, profileId: options.profileId });
+        const [claim] = await claimJobs({
+          now: options.now,
+          limit: 1,
+          profileId: options.profileId,
+          kinds: options.kinds,
+        });
         if (!claim) return;
         summary.claimed += 1;
         const outcome = await executeJob(claim, { now: options.now, handlers });
@@ -112,19 +119,20 @@ function consentCurrent(kind: "terms" | "privacy") {
   ) is true`;
 }
 
-function localDate(now: Date, timezone: string | null): string {
+function localDate(instant: Date, timezone: string | null): string {
   try {
-    return localDateKey(now, timezone ?? "UTC");
+    return localDateKey(instant, timezone ?? "UTC");
   } catch {
-    return localDateKey(now, "UTC");
+    return localDateKey(instant, "UTC");
   }
 }
 
 /**
  * Queue the daily review of every active profile whose review time has passed, for users
  * who are verified, active, and onboarded with current terms and privacy consent. The job
- * key carries the local date in the user's timezone, so a profile gets one scheduled review
- * per local date. Queueing the job and moving the next review time happen in one
+ * key carries the local date, in the user's timezone, of the review time that was due (not
+ * of the run that picks it up), so a profile gets one scheduled review per local date
+ * however late a run is. Queueing the job and moving the next review time happen in one
  * transaction, under the profile's row lock: a crash, or a second tick, cannot queue twice.
  */
 async function enqueueDueReviews(now: Date, limit: number): Promise<number> {
@@ -166,7 +174,7 @@ async function enqueueDueReviews(now: Date, limit: number): Promise<number> {
           .for("key share");
         if (!owner || !owner.emailVerified || owner.status !== "active" || owner.onboardedAt === null) return false;
         const [due] = await tx
-          .select({ id: profile.id })
+          .select({ id: profile.id, nextReviewAt: profile.nextReviewAt })
           .from(profile)
           .where(
             and(
@@ -177,12 +185,15 @@ async function enqueueDueReviews(now: Date, limit: number): Promise<number> {
             ),
           )
           .for("no key update", { skipLocked: true });
-        if (!due) return false;
+        if (!due || due.nextReviewAt === null) return false;
+        // Keyed by the date the review was scheduled for. A run that starts after local
+        // midnight still files a late-evening review under its own date, so the review of
+        // the date that has just begun is not deduplicated away.
         const queued = await enqueueJob(tx, {
           userId: candidate.userId,
           profileId: candidate.profileId,
           kind: "daily_review",
-          dedupeKey: dedupeKey.daily(candidate.profileId, localDate(now, owner.timezone)),
+          dedupeKey: dedupeKey.daily(candidate.profileId, localDate(due.nextReviewAt, owner.timezone)),
           runAfter: now,
         });
         await tx

@@ -114,6 +114,41 @@ describe("runRetention", () => {
     expect((await ids(getDb().select({ id: user.id }).from(user))).sort()).toEqual([recentId, owner.userId].sort());
   });
 
+  it("keeps an old account that is unverified but holds a profile and its imports", async () => {
+    const owner = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    const snapshotId = await addSnapshot(owner, {
+      capturedAt: "2026-09-01T12:00:00+00:00",
+      followers: ["nova_labs"],
+      following: ["pixel_forge"],
+    });
+    // An account that got past sign-up and was later marked unverified, for example by an operator.
+    await getDb()
+      .update(user)
+      .set({ emailVerified: false, createdAt: daysAgo(LIMITS.retainUnverifiedAccountDays + 30) })
+      .where(eq(user.id, owner.userId));
+
+    const result = await runRetention({ now: NOW });
+
+    expect(result.unverifiedAccounts).toBe(0);
+    expect(await ids(getDb().select({ id: user.id }).from(user))).toEqual([owner.userId]);
+    expect(await ids(getDb().select({ id: profile.id }).from(profile))).toEqual([owner.profileId]);
+    expect(await ids(getDb().select({ id: exportSnapshot.id }).from(exportSnapshot))).toEqual([snapshotId]);
+  });
+
+  it("removes a stale sign-up next to an unverified account that holds a profile", async () => {
+    const kept = await ownerWithProfile("atlas@orbitdiff.test", "atlas_studio");
+    await getDb()
+      .update(user)
+      .set({ emailVerified: false, createdAt: daysAgo(LIMITS.retainUnverifiedAccountDays + 30) })
+      .where(eq(user.id, kept.userId));
+    await pendingAccount("nova@orbitdiff.test", daysAgo(LIMITS.retainUnverifiedAccountDays, 1));
+
+    const result = await runRetention({ now: NOW });
+
+    expect(result.unverifiedAccounts).toBe(1);
+    expect(await ids(getDb().select({ id: user.id }).from(user))).toEqual([kept.userId]);
+  });
+
   it("removes captured mail past its window", async () => {
     await getDb().insert(mailCapture).values([
       { toAddress: "atlas@orbitdiff.test", kind: "verify_email", subject: "old", body: "old", createdAt: daysAgo(LIMITS.retainCapturedMailDays, 1) },

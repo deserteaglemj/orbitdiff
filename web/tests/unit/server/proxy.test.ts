@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 
 import { config, proxy } from "@/proxy";
-import { PATHNAME_HEADER } from "@/server/auth/paths";
+import { PATHNAME_HEADER, PROTECTED_PREFIXES, requestedPathname } from "@/server/auth/paths";
 import {
   STATIC_CONTENT_SECURITY_POLICY,
   STATIC_SECURITY_HEADERS,
@@ -80,6 +80,29 @@ describe("proxy: security headers", () => {
     );
     expect(forwarded(response, PATHNAME_HEADER)).toBe("/dashboard");
     expect(forwarded(response, "x-nonce")).not.toBe("forged");
+  });
+
+  /** The request headers a page receives after the proxy ran, rebuilt from what Next.js encodes on the response. */
+  function receivedByPage(response: Response): Headers {
+    const received = new Headers();
+    for (const [name, value] of response.headers) {
+      const prefix = "x-middleware-request-";
+      if (name.startsWith(prefix)) received.set(name.slice(prefix.length), value);
+    }
+    return received;
+  }
+
+  it("marks the request so the signed-in layout accepts the path it reported, and only that path", () => {
+    const response = proxy(
+      request("/profiles/abc", { cookie: SESSION, headers: { [PATHNAME_HEADER]: "/onboarding", "x-nonce": "forged" } }),
+    );
+    expect(requestedPathname(receivedByPage(response))).toBe("/profiles/abc");
+  });
+
+  it("leaves a request it did not run on unmarked, so the layout ignores a path header the client sent", () => {
+    // What reaches a page when the proxy did not run: the client's own headers, untouched.
+    const untouched = request("/profiles/abc", { cookie: SESSION, headers: { [PATHNAME_HEADER]: "/onboarding" } });
+    expect(requestedPathname(untouched.headers)).toBeNull();
   });
 
   it("needs no configuration: it works with no variable set", () => {
@@ -168,6 +191,44 @@ describe("proxy: which requests it runs on", () => {
   ])("does not run on %s, which gets its headers from the static rules", (url) => {
     expect(matches(url)).toBe(false);
   });
+
+  /** A file extension in a deeper segment does not make a path a file from public/. */
+  const NESTED_EXTENSION_PATHS = PROTECTED_PREFIXES.flatMap((prefix) =>
+    ["svg", "png", "ico", "txt", "xml"].map((extension) => `${prefix}/abc.${extension}`),
+  );
+
+  it.each([...NESTED_EXTENSION_PATHS, "/profiles/abc/history.png", "/legal/terms.txt"])(
+    "runs on %s: only a file name at the root is skipped",
+    (url) => {
+      expect(matches(url)).toBe(true);
+    },
+  );
+
+  it.each(NESTED_EXTENSION_PATHS)("sends %s to sign-in when there is no session cookie", (url) => {
+    const response = proxy(request(url));
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/sign-in");
+  });
+
+  it.each(["/profiles/abc.png", "/onboarding/abc.svg"])(
+    "replaces the path header a client sent with %s, as on every other page",
+    (url) => {
+      expect(matches(url)).toBe(true);
+      const response = proxy(request(url, { cookie: SESSION, headers: { [PATHNAME_HEADER]: "/onboarding" } }));
+      expect(forwarded(response, PATHNAME_HEADER)).toBe(url);
+    },
+  );
+
+  it.each(["/_next/staticfoo", "/_next/staticfoo/x.js", "/_next/static", "/_next/imagefoo", "/_next/image/extra", "/apidocs"])(
+    "runs on %s, which only looks like a build path",
+    (url) => {
+      expect(matches(url)).toBe(true);
+    },
+  );
+
+  it.each(["/api", "/robots.txt", "/sitemap.xml", "/_next/static/css/a.css"])("does not run on %s", (url) => {
+    expect(matches(url)).toBe(false);
+  });
 });
 
 describe("next.config: headers for every response", () => {
@@ -212,5 +273,66 @@ describe("next.config: headers for every response", () => {
       const byRule = (await respond(url)).headers.has("content-security-policy");
       expect(byProxy !== byRule, url).toBe(true);
     }
+  });
+
+  /** Which of the two policies a path gets: "proxy", "fixed", "both", or "none". */
+  async function policyOf(url: string): Promise<string> {
+    const byProxy = unstable_doesMiddlewareMatch({ config, nextConfig, url });
+    const byRule = (await respond(url)).headers.has("content-security-policy");
+    if (byProxy && byRule) return "both";
+    if (byProxy) return "proxy";
+    return byRule ? "fixed" : "none";
+  }
+
+  const PAGES = [
+    // A file extension below the root: a page path, for example a dynamic segment that ends in one.
+    "/profiles/abc.png",
+    "/profiles/abc/history.svg",
+    "/dashboard/report.svg",
+    "/settings/notes.txt",
+    "/admin/users.xml",
+    "/onboarding/step.ico",
+    "/legal/terms.txt",
+    // Near misses of the build prefixes and of the API prefix.
+    "/_next",
+    "/_next/static",
+    "/_next/static/",
+    "/_next/staticfoo",
+    "/_next/staticfoo/x.js",
+    "/_next/imagefoo",
+    "/_next/image/extra",
+    "/_next/data/build/index.json",
+    "/apidocs",
+    "/api-keys",
+    // Near misses of a file name.
+    "/x.PNG",
+    "/.png",
+    "/file.pngx",
+    "/png",
+  ];
+
+  const NOT_PAGES = [
+    "/api",
+    "/api/",
+    "/api/health",
+    "/api/profiles/abc.png",
+    "/_next/static/chunks/main.js",
+    "/_next/static/media/font.woff2",
+    "/_next/image",
+    "/_next/image/",
+    "/orbitdiff-mark.svg",
+    "/favicon.ico",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/a.b.png",
+    "/a.png/",
+  ];
+
+  it.each(PAGES)("gives %s the proxy's policy and no other", async (url) => {
+    expect(await policyOf(url)).toBe("proxy");
+  });
+
+  it.each(NOT_PAGES)("gives %s the fixed policy and no other", async (url) => {
+    expect(await policyOf(url)).toBe("fixed");
   });
 });

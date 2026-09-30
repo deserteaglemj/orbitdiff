@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { SuspendedScreen } from "@/components/auth/suspended-screen";
 import { resolvePageAccess } from "@/server/auth/page-access";
-import { PATHNAME_HEADER } from "@/server/auth/paths";
+import { requestedPathname } from "@/server/auth/paths";
 
 /**
  * Layout of every signed-in page. Who may see it is decided by the guards
@@ -20,14 +20,21 @@ import { PATHNAME_HEADER } from "@/server/auth/paths";
  * - suspended: a plain notice in place of the page.
  *
  * The Admin link is shown only when requireAdmin passes. The link is a
- * convenience: /admin answers 404 to everyone else.
+ * convenience: /admin answers 404 to every other account that reaches the page;
+ * see docs/web/interface.md section 11.
  *
  * A layout is not rendered again on a client-side navigation, so every page
  * below it calls the guards itself before it loads data.
+ *
+ * Which page is being asked for comes from the proxy, as a request header. The
+ * header is read through requestedPathname(), which ignores it on a request
+ * that did not come through the proxy: there the value would be the client's
+ * own. An unknown path is treated as a page other than onboarding, so a user
+ * who is not onboarded is sent to onboarding.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const requestHeaders = await headers();
-  const access = await resolvePageAccess(requestHeaders, requestHeaders.get(PATHNAME_HEADER));
+  const access = await resolvePageAccess(requestHeaders, requestedPathname(requestHeaders));
   if (access.kind === "redirect") redirect(access.to);
   if (access.kind === "suspended") return <SuspendedScreen signOutButton={<SignOutButton />} />;
   return (

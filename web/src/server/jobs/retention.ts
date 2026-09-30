@@ -1,11 +1,11 @@
 import "server-only";
 
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, notExists, sql } from "drizzle-orm";
 
 import { LIMITS } from "@/domain/limits";
 import { purgeUserLeftovers } from "@/server/auth/deletion";
 import { getDb } from "@/server/db/client";
-import { activityEntry, job, mailCapture, rateLimit, user, verification } from "@/server/db/schema";
+import { activityEntry, job, mailCapture, profile, rateLimit, user, verification } from "@/server/db/schema";
 import { logError } from "@/server/http/log";
 
 /** Rows removed per kind in one run. A backlog is worked off over several runs. */
@@ -43,10 +43,11 @@ async function step(work: () => Promise<number>): Promise<number> {
 
 /**
  * Remove what has outlived its purpose: finished jobs and activity past their windows,
- * accounts that were never verified, captured mail, expired verification rows, and idle
- * rate limit counters. Every delete is bounded. Export snapshots, change events, profiles
- * and verified accounts are never touched here: a user's stored evidence only goes when
- * the user removes it.
+ * accounts that never got past sign-up (unverified and without a profile), captured mail,
+ * expired verification rows, and idle rate limit counters. Every delete is bounded. Export
+ * snapshots, change events, profiles, verified accounts, and any account that holds a
+ * profile are never touched here: a user's stored evidence only goes when the user
+ * removes it.
  */
 export async function runRetention(options: RetentionOptions): Promise<RetentionSummary> {
   const db = getDb();
@@ -74,9 +75,16 @@ export async function runRetention(options: RetentionOptions): Promise<Retention
 
   const unverifiedAccounts = await step(async () => {
     const cutoff = before(LIMITS.retainUnverifiedAccountDays);
-    const stale = and(eq(user.emailVerified, false), lt(user.createdAt, cutoff));
+    // Only an account that never got past sign-up: unverified, old, and without a profile. An
+    // account that holds a profile holds evidence, whatever its verification flag says now.
+    const stale = and(
+      eq(user.emailVerified, false),
+      lt(user.createdAt, cutoff),
+      notExists(db.select({ one: sql`1` }).from(profile).where(eq(profile.userId, user.id))),
+    );
     const doomed = db.select({ id: user.id }).from(user).where(stale).limit(batch);
-    // The condition is repeated on the delete itself: an account verified a moment ago stays.
+    // The condition is repeated on the delete itself: an account verified a moment ago, or
+    // one that has just added a profile, stays.
     const removed = await db
       .delete(user)
       .where(and(inArray(user.id, doomed), stale))

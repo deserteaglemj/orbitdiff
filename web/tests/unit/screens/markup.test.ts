@@ -222,11 +222,49 @@ describe("account screens on a deployment that is not configured", () => {
       expect(render(SignInScreen, props), String(configured)).not.toContain("<form");
     }
   });
+
+  it.each(["waiting", "opened", "invalid"] as const)(
+    "show a plain notice in place of the verify page in the %s state, and claim nothing about an account",
+    (state) => {
+      const html = render(VerifyEmailScreen, { configured: false, state, mailCaptured: false });
+      const text = htmlToText(html);
+      expect(text).toContain(NOTICE);
+      expect(text).toContain("Confirming an email address is unavailable until its storage is configured.");
+      expect(html).not.toContain("<form");
+      expect(controls(html)).toEqual([]);
+      // There is no storage, so no account was created and nothing can be confirmed.
+      expect(text).not.toContain("Your account was created");
+      expect(text).not.toContain("Request a new confirmation message");
+      expect(html).not.toContain('href="/sign-in?confirm=1"');
+    },
+  );
+
+  it("show a plain notice in place of the new password form, even when the link carries a token", () => {
+    const html = render(ResetPasswordScreen, { configured: false, token: "reset-token-for-markup-test", linkError: false });
+    const text = htmlToText(html);
+    expect(text).toContain(NOTICE);
+    expect(text).toContain("Choosing a new password is unavailable until its storage is configured.");
+    expect(html).not.toContain("<form");
+    expect(controls(html)).toEqual([]);
+    expect(html).not.toContain("reset-token-for-markup-test");
+  });
+
+  it("treat anything but configured true as not configured on the verify and reset pages too", () => {
+    for (const configured of [undefined, null, "true", 1]) {
+      const flag = configured as unknown as boolean;
+      const verify = render(VerifyEmailScreen, { configured: flag, state: "waiting", mailCaptured: true });
+      const reset = render(ResetPasswordScreen, { configured: flag, token: "token", linkError: false });
+      for (const html of [verify, reset]) {
+        expect(html, String(configured)).not.toContain("<form");
+        expect(htmlToText(html), String(configured)).toContain(NOTICE);
+      }
+    }
+  });
 });
 
 describe("verify-email screen", () => {
   const view = (state: "waiting" | "opened" | "invalid", mailCaptured: boolean) =>
-    htmlToText(render(VerifyEmailScreen, { state, mailCaptured }));
+    htmlToText(render(VerifyEmailScreen, { configured: true, state, mailCaptured }));
 
   it("tells the visitor to open the link from the confirmation message", () => {
     const text = view("waiting", false);
@@ -251,7 +289,7 @@ describe("verify-email screen", () => {
   });
 
   it("explains that an opened link still needs the password, and leads to sign-in", () => {
-    const html = render(VerifyEmailScreen, { state: "opened", mailCaptured: false });
+    const html = render(VerifyEmailScreen, { configured: true, state: "opened", mailCaptured: false });
     const text = htmlToText(html);
     expect(text).toContain("The link was opened in this browser");
     expect(text).toContain("Sign in with your password to confirm your email address");
@@ -259,13 +297,13 @@ describe("verify-email screen", () => {
   });
 
   it("explains a link that is not valid and offers a new confirmation message", () => {
-    const html = render(VerifyEmailScreen, { state: "invalid", mailCaptured: false });
+    const html = render(VerifyEmailScreen, { configured: true, state: "invalid", mailCaptured: false });
     expect(htmlToText(html)).toContain("That confirmation link is not valid or has expired");
     expect(names(html)).toEqual(["email"]);
   });
 
   it("offers a new confirmation message while waiting", () => {
-    expect(names(render(VerifyEmailScreen, { state: "waiting", mailCaptured: true }))).toEqual(["email"]);
+    expect(names(render(VerifyEmailScreen, { configured: true, state: "waiting", mailCaptured: true }))).toEqual(["email"]);
   });
 });
 
@@ -282,7 +320,7 @@ describe("reset-password screen", () => {
   const TOKEN = "reset-token-for-markup-test";
 
   it("asks for the new password twice when the link carries a token, and never prints the token", () => {
-    const html = render(ResetPasswordScreen, { token: TOKEN, linkError: false });
+    const html = render(ResetPasswordScreen, { configured: true, token: TOKEN, linkError: false });
     expect(names(html)).toEqual(["confirmPassword", "newPassword"]);
     expect(control(html, "newPassword")).toContain('autoComplete="new-password"');
     expect(control(html, "newPassword")).toContain('minLength="10"');
@@ -290,14 +328,14 @@ describe("reset-password screen", () => {
   });
 
   it("says the link is not valid when there is no token", () => {
-    const html = render(ResetPasswordScreen, { token: null, linkError: false });
+    const html = render(ResetPasswordScreen, { configured: true, token: null, linkError: false });
     expect(controls(html)).toEqual([]);
     expect(htmlToText(html)).toContain("This reset link is not valid or has expired");
     expect(html).toContain('href="/forgot-password"');
   });
 
   it("says the link is not valid when the link came back with an error, even with a token", () => {
-    const html = render(ResetPasswordScreen, { token: TOKEN, linkError: true });
+    const html = render(ResetPasswordScreen, { configured: true, token: TOKEN, linkError: true });
     expect(controls(html)).toEqual([]);
     expect(htmlToText(html)).toContain("This reset link is not valid or has expired");
   });
@@ -325,11 +363,63 @@ describe("onboarding flow", () => {
     timezone: "Europe/Berlin",
     reviewHour: 9,
     onboarded: false,
+    completedBefore: false,
     profiles: 0,
     consent,
   };
   const flow = (overrides: Partial<typeof account> = {}) =>
     render(OnboardingFlow, { account: { ...account, ...overrides }, timezones: TIMEZONES, versions: VERSIONS });
+
+  /** An account that finished onboarding earlier and whose recorded consent is for an older version. */
+  const outdated = (kinds: ReadonlyArray<"terms" | "privacy">): ConsentStateDto => ({
+    terms: kinds.includes("terms") ? { ...granted("terms"), version: "2025-01-01" } : granted("terms"),
+    privacy: kinds.includes("privacy") ? { ...granted("privacy"), version: "2025-01-01" } : granted("privacy"),
+    marketing: null,
+  });
+  const returning = (kinds: ReadonlyArray<"terms" | "privacy">, profiles: number) =>
+    flow({ onboarded: false, completedBefore: true, profiles, consent: outdated(kinds) });
+
+  it("asks a returning user only to agree to the current documents, not for their details again", () => {
+    const html = returning(["terms", "privacy"], 2);
+    expect(names(html)).toEqual(["privacy", "terms"]);
+    const text = htmlToText(html);
+    expect(text).toContain("I agree to the Terms");
+    expect(text).toContain("I agree to the Privacy notice");
+    expect(text).not.toContain("Display name");
+    expect(text).not.toContain("Daily review hour");
+  });
+
+  it("asks a returning user only for the document whose version went out of date", () => {
+    const html = returning(["privacy"], 3);
+    expect(names(html)).toEqual(["privacy"]);
+    expect(htmlToText(html)).toContain(`version ${CONSENT_VERSIONS.terms}`);
+  });
+
+  it("does not present a returning user with a first-run setup or a first profile", () => {
+    for (const profiles of [0, 1, 3]) {
+      const html = returning(["terms"], profiles);
+      const text = htmlToText(html);
+      expect(text, String(profiles)).not.toContain("Set up OrbitDiff Web");
+      expect(text, String(profiles)).not.toContain("Three short steps");
+      expect(text, String(profiles)).not.toContain("Add your first profile");
+      expect(text, String(profiles)).not.toContain("First profile");
+      expect(html, String(profiles)).not.toContain('aria-label="Setup steps"');
+    }
+  });
+
+  it("tells a returning user why they are here and that their data is unchanged", () => {
+    const text = htmlToText(returning(["terms", "privacy"], 2));
+    expect(text).toContain("Agree to the current Terms and Privacy notice");
+    expect(text).toContain("no agreement on record for the current version");
+    expect(text).toContain("Your profiles and imports are unchanged");
+  });
+
+  it("keeps the first-run setup for an account that never completed onboarding, even with outdated consent", () => {
+    const html = flow({ onboarded: false, completedBefore: false, consent: outdated(["terms"]) });
+    expect(names(html)).toEqual(["name", "reviewHour", "timezone"]);
+    expect(htmlToText(html)).toContain("Set up OrbitDiff Web");
+    expect(html).toContain('aria-label="Setup steps"');
+  });
 
   it("starts by confirming the display name, the timezone, and the daily review hour", () => {
     const html = flow();
@@ -349,7 +439,7 @@ describe("onboarding flow", () => {
   });
 
   it("goes straight to the first profile when onboarding is already complete", () => {
-    const html = flow({ onboarded: true });
+    const html = flow({ onboarded: true, completedBefore: true });
     expect(names(html)).toEqual(["profile"]);
     const text = htmlToText(html);
     expect(text).toContain("Instagram username or profile link (required)");
@@ -428,24 +518,38 @@ describe("every account screen", () => {
     timezone: "UTC",
     reviewHour: 9,
     onboarded: false,
+    completedBefore: false,
     profiles: 0,
     consent: { terms: granted("terms"), privacy: granted("privacy"), marketing: null },
+  };
+  const returningAccount = {
+    ...account,
+    completedBefore: true,
+    profiles: 2,
+    consent: { ...account.consent, terms: { ...granted("terms"), version: "2025-01-01" } },
   };
   const screens: Array<[string, string]> = [
     ["sign-up", signUp({ ...OPEN, accessCodeRequired: true })],
     ["sign-up closed", signUp({ open: false, reason: "Registration is closed: storage is not configured.", accessCodeRequired: false, mailCaptured: false })],
     ["sign-in", render(SignInScreen, { configured: true, next: null, mailCaptured: true, notice: "confirm" })],
-    ["verify waiting", render(VerifyEmailScreen, { state: "waiting", mailCaptured: true })],
-    ["verify opened", render(VerifyEmailScreen, { state: "opened", mailCaptured: true })],
-    ["verify invalid", render(VerifyEmailScreen, { state: "invalid", mailCaptured: true })],
+    ["verify waiting", render(VerifyEmailScreen, { configured: true, state: "waiting", mailCaptured: true })],
+    ["verify opened", render(VerifyEmailScreen, { configured: true, state: "opened", mailCaptured: true })],
+    ["verify invalid", render(VerifyEmailScreen, { configured: true, state: "invalid", mailCaptured: true })],
     ["forgot password", render(ForgotPasswordScreen, { configured: true, mailCaptured: true })],
-    ["reset password", render(ResetPasswordScreen, { token: "token", linkError: false })],
-    ["reset password invalid", render(ResetPasswordScreen, { token: null, linkError: false })],
+    ["reset password", render(ResetPasswordScreen, { configured: true, token: "token", linkError: false })],
+    ["reset password invalid", render(ResetPasswordScreen, { configured: true, token: null, linkError: false })],
+    ["verify not configured", render(VerifyEmailScreen, { configured: false, state: "waiting", mailCaptured: false })],
+    ["reset password not configured", render(ResetPasswordScreen, { configured: false, token: "token", linkError: false })],
     ["onboarding", render(OnboardingFlow, { account, timezones: TIMEZONES, versions: VERSIONS })],
     [
       "onboarding profile",
-      render(OnboardingFlow, { account: { ...account, onboarded: true }, timezones: TIMEZONES, versions: VERSIONS }),
+      render(OnboardingFlow, {
+        account: { ...account, onboarded: true, completedBefore: true },
+        timezones: TIMEZONES,
+        versions: VERSIONS,
+      }),
     ],
+    ["onboarding returning", render(OnboardingFlow, { account: returningAccount, timezones: TIMEZONES, versions: VERSIONS })],
   ];
 
   it.each(screens)("%s has exactly one h1", (_name, html) => {

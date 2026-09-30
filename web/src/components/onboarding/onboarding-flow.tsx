@@ -30,23 +30,24 @@ import {
   buildOnboardingBody,
   consentToConfirm,
   describeAgreementRefusal,
+  flowHeader,
   initialStep,
+  isReturning,
   REVIEW_HOUR_OPTIONS,
+  stepAfterAgreement,
   validateDetails,
   type DocumentVersions,
+  type OnboardingAccount,
   type OnboardingStep,
   type RequiredDocument,
 } from "./model";
 
-export interface OnboardingAccount {
-  name: string;
-  timezone: string;
-  reviewHour: number;
-  onboarded: boolean;
-  /** How many profiles the account already has. */
-  profiles: number;
-  consent: ConsentStateDto;
-}
+/**
+ * The account the page hands over. `onboarded` and `completedBefore` are two
+ * facts (see OnboardingStanding in ./model): true `completedBefore` with false
+ * `onboarded` is a returning user whose agreement is no longer current.
+ */
+export type { OnboardingAccount };
 
 const STEPS: Array<{ id: Exclude<OnboardingStep, "done">; title: string }> = [
   { id: "details", title: "Your details" },
@@ -104,6 +105,12 @@ function StepHeading({ headingRef, children }: { headingRef: React.RefObject<HTM
  * profile. Every step calls a route of this app and shows that route's own
  * message when it refuses.
  *
+ * A returning user, one who completed onboarding before and whose agreement is
+ * no longer current, gets one step only: the agreement. The page says why they
+ * are here, and once the agreement is recorded an account that already has a
+ * profile is done. It is never walked through the details or asked for a
+ * "first" profile again.
+ *
  * `versions` are the versions of the Terms and the Privacy notice the server
  * held when it rendered the page. They are what the screen prints and what the
  * agreement step names in its request, so consent is only ever recorded at a
@@ -143,6 +150,8 @@ export function OnboardingFlow({
   }, [step]);
 
   const needed = consentToConfirm(consent, versions);
+  // Decided once, from what the server rendered: it does not flip when the agreement is recorded.
+  const returning = isReturning(account);
 
   /**
    * Show the field errors and move focus to the first one in screen order. The
@@ -205,7 +214,7 @@ export function OnboardingFlow({
       return;
     }
     setConsent(response.data.consent);
-    setStep("profile");
+    setStep(stepAfterAgreement(account));
   }
 
   async function addProfile(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -232,13 +241,22 @@ export function OnboardingFlow({
 
   return (
     <>
-      <PageHeader
-        title="Set up OrbitDiff Web"
-        description="Three short steps. Nothing here asks for your Instagram password, codes, or session."
-      />
-      <div className="mt-6">
-        <StepList current={step} />
-      </div>
+      {flowHeader(account, step) === "agreement" ? (
+        <PageHeader
+          title="Agree to the current Terms and Privacy notice"
+          description="This account has no agreement on record for the current version of the documents below. Read them and agree to continue. Your profiles and imports are unchanged."
+        />
+      ) : (
+        <>
+          <PageHeader
+            title="Set up OrbitDiff Web"
+            description="Three short steps. Nothing here asks for your Instagram password, codes, or session."
+          />
+          <div className="mt-6">
+            <StepList current={step} />
+          </div>
+        </>
+      )}
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)] lg:gap-16">
         <div className="min-w-0">
@@ -375,8 +393,14 @@ export function OnboardingFlow({
 
           {step === "done" ? (
             <div className="grid gap-5">
-              <StepHeading headingRef={headingRef}>You are set up</StepHeading>
-              <p className="text-ink">Your account is ready. Import an export from the dashboard.</p>
+              <StepHeading headingRef={headingRef}>
+                {returning ? "Your agreement is recorded" : "You are set up"}
+              </StepHeading>
+              <p className="text-ink">
+                {returning
+                  ? "You can use OrbitDiff Web again. Your profiles and imports are where you left them."
+                  : "Your account is ready. Import an export from the dashboard."}
+              </p>
               <div>
                 <LinkButton href={DASHBOARD} variant="primary" size="lg">
                   Go to the dashboard

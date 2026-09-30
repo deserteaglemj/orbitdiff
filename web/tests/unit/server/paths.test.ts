@@ -1,10 +1,16 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   afterSignInPath,
   hasSessionCookie,
   isProtectedPath,
+  NONCE_HEADER,
+  PATHNAME_HEADER,
   PROTECTED_PREFIXES,
+  requestedPathname,
   safeNextPath,
   signInPath,
   signInRedirect,
@@ -166,5 +172,56 @@ describe("afterSignInPath", () => {
     for (const next of ["/sign-in", "/sign-up", "/verify-email", "/forgot-password", "/reset-password?token=abc"]) {
       expect(afterSignInPath({ onboarded: true, next })).toBe("/dashboard");
     }
+  });
+});
+
+describe("requestedPathname: the path header counts only on a request that came through the proxy", () => {
+  const NONCE = "bm9uY2UtZm9yLWEtdGVzdA==";
+  const policy = (nonce: string) => `default-src 'self'; script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`;
+  /** The three request headers the proxy sets together. */
+  const throughProxy = (pathname: string) =>
+    new Headers({ [PATHNAME_HEADER]: pathname, [NONCE_HEADER]: NONCE, "content-security-policy": policy(NONCE) });
+
+  it("returns the path the proxy reported", () => {
+    expect(requestedPathname(throughProxy("/onboarding"))).toBe("/onboarding");
+    expect(requestedPathname(throughProxy("/profiles/abc"))).toBe("/profiles/abc");
+  });
+
+  it("ignores a path header on a request that carries no nonce: the proxy did not run on it", () => {
+    expect(requestedPathname(new Headers({ [PATHNAME_HEADER]: "/onboarding" }))).toBeNull();
+  });
+
+  it("ignores a path header with an empty nonce", () => {
+    const headers = throughProxy("/onboarding");
+    headers.set(NONCE_HEADER, "");
+    expect(requestedPathname(headers)).toBeNull();
+  });
+
+  it("ignores a path header with a nonce but without the policy the proxy sets beside it", () => {
+    expect(requestedPathname(new Headers({ [PATHNAME_HEADER]: "/onboarding", [NONCE_HEADER]: NONCE }))).toBeNull();
+  });
+
+  it("ignores a path header whose policy names another nonce", () => {
+    const headers = throughProxy("/onboarding");
+    headers.set("content-security-policy", policy("c29tZS1vdGhlci1ub25jZQ=="));
+    expect(requestedPathname(headers)).toBeNull();
+  });
+
+  it("returns null when the proxy reported no path", () => {
+    const headers = throughProxy("/onboarding");
+    headers.delete(PATHNAME_HEADER);
+    expect(requestedPathname(headers)).toBeNull();
+  });
+
+  it("names the nonce header the Next.js guide reads", () => {
+    expect(NONCE_HEADER).toBe("x-nonce");
+  });
+});
+
+describe("the signed-in layout", () => {
+  it("reads the path through requestedPathname, never straight from the header", () => {
+    const layout = readFileSync(path.resolve(import.meta.dirname, "../../../src/app/(app)/layout.tsx"), "utf8");
+    expect(layout).toContain("requestedPathname(requestHeaders)");
+    expect(layout).not.toContain("PATHNAME_HEADER");
   });
 });
