@@ -77,7 +77,8 @@ was not verified, including unavailable host discovery or platform execution.
 
 Example task requests:
 
-- **Owner import:** "Import my supplied JSON export for `atlas_studio` into my selected workspace. I have not declared either direction complete."
-- **Stored reads:** "Show my stored relationships and changes, with source dates and coverage. Do not collect new data."
+- **Stored public changes:** "Show changes in `atlas_studio`'s stored public following list. Which accounts appeared or disappeared? Include first-observed and confirmed dates, separate pending changes, and explain anything unknown. Use my selected workspace without collecting new data."
 - **Authorized public baseline:** "Establish one public following baseline for `nova_labs` in my selected workspace using my existing login handle, if no successful baseline exists."
+- **Owner import:** "Import my supplied JSON export for `atlas_studio` into my selected workspace. I have not declared either direction complete."
+- **Stored relationships:** "Show my stored personal relationships and export observations, with source dates and coverage. Do not collect new data."
 - **Diagnosis:** "Explain missing, stale, partial, or failed sources using stored evidence. Keep unknown causes unknown and report the next permitted action."

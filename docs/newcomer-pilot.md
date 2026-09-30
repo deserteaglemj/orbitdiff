@@ -1,8 +1,8 @@
 # Newcomer pilot
 
-Purpose: measure whether real newcomers can understand OrbitDiff, choose a route, reach the offline demo, interpret a supplied export, and find help. This packet is prepared; no participant sessions have been run.
+Purpose: measure whether real newcomers understand the public-following promise, reach the offline demo, interpret observation dates, distinguish the separate personal-export workflow, and find help. This packet is prepared; no participant sessions have been run.
 
-Use five people who have not maintained OrbitDiff. The user supplies participants or separately authorizes recruitment. Keep anonymous IDs P01-P05 and synthetic inputs. Use existing local agents, authentication, and tools; note missing prerequisites instead of changing accounts, installing new agent hosts, or buying access.
+Use five people who have not maintained OrbitDiff. The user supplies participants or separately authorizes recruitment. Prefer people interested in understanding public following changes with a local agent. Record why they would use the tool in their own words; the founder's relationship-curiosity positioning is a hypothesis to test. Keep anonymous IDs P01-P05 and synthetic inputs. Use existing local agents, authentication, and tools; note missing prerequisites instead of changing accounts, installing new agent hosts, or buying access.
 
 ## Facilitator setup
 
@@ -39,8 +39,9 @@ Share only this section and the named materials, not the evaluator rubric below.
 
 1. Open the README. In your own words, explain what OrbitDiff helps you do, what you would need to provide, and whether it fits your situation.
 2. Starting from that page in your selected project, get a working example result without using your real Instagram account. Explain what you did and what the result tells you. Use the docs as you normally would.
-3. Import the supplied export for atlas_studio into the selected workspace. Explain what the result says about nova_labs and pixel_forge, and what it tells you about changes happening right now.
-4. Read the missing-executable scenario card. Find the next step and explain where you found it.
+3. Read the public-following example on the README. Explain which account changed, what each date tells you, and what remains unknown. Describe what you would need to do before asking an agent to check each day. This is an interpretation task; leave live collection untouched.
+4. Import the supplied export for atlas_studio into the selected workspace. Explain what the result says about nova_labs and pixel_forge, and what it tells you about changes happening right now.
+5. Read the missing-executable scenario card. Find the next step and explain where you found it.
 
 You may stop at any time. Ask for help when you normally would; the facilitator will record where help was needed. Do not provide credentials or run live Instagram collection.
 
@@ -50,10 +51,11 @@ Use observed actions and the participant's complete explanation. Do not correct 
 
 | Task | Observable acceptance |
 | --- | --- |
-| Understanding | Explains the tool's purpose and necessary input, and distinguishes instructions from commands. |
+| Understanding | Identifies changes in another account's public following list as the primary use case, explains necessary input, and distinguishes instructions from commands. |
 | First result | Completes the selected installation/setup route and runs the isolated offline demo. Can identify the separate personal and public sources. Placement alone does not count as host execution. |
 | Interpretation | Recognizes nova_labs as mutual in the supplied snapshot; leaves pixel_forge reciprocity and capture time unknown; does not call snapshot differences live-confirmed events. |
-| Public evidence | Explains that confirmation needs two matching complete observations and that an offline demo provides no live collection proof. Score from the participant's explanation without supplying this answer. |
+| Public evidence | Identifies pixel_forge as the illustrative addition; distinguishes first-observed from confirmed dates and exact Follow action time; explains the baseline and two matching complete observations. Recognizes the image as synthetic, leaves personal motives unknown, and does not treat the demo as live collection proof. |
+| Daily use | Finds that scheduling needs an explicitly requested, supported host schedule after a verified manual live workflow. Does not mistake skill installation for an active daily job. |
 | Recovery | Finds the installation guidance, identifies the missing runtime prerequisite, and chooses a supported route without proposing an overwrite or claiming an unperformed repair. |
 | Preservation | Fixtures retain contents/modes/times; real/default history is unchanged; only the selected synthetic workspace is populated. |
 
