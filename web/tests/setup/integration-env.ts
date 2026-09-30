@@ -10,3 +10,5 @@ process.env.JOBS_TICK_SECRET = `${filler}jobs`;
 process.env.MAILBOX_SECRET = `${filler}mail`;
 process.env.EMAIL_TRANSPORT = "capture";
 process.env.ADMIN_EMAILS = "owner@orbitdiff.test";
+// Registration is closed until an operator is named. A synthetic name keeps it open for the tests.
+process.env.OPERATOR_NAME = "OrbitDiff Test Operator";
