@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "node scripts/check-hosted-rules.mjs && tsx scripts/migrate.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -14,7 +14,8 @@
     "test:integration": "vitest run --project integration",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "parity:check": "node scripts/parity-check.mjs"
+    "parity:check": "node scripts/parity-check.mjs",
+    "rules:check": "node scripts/check-hosted-rules.mjs"
   },
   "dependencies": {
     "better-auth": "1.7.6",

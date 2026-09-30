@@ -316,3 +316,198 @@ A value is a path on this site only after it has been resolved the way a browser
 ### Pages and the nonce: the check
 
 `tests/unit/server/per-request-pages.test.ts` walks `src/app` and fails when a `page.tsx` or `not-found.tsx` has no request API (`await connection()`, `await headers()`, `await cookies()`, an awaited `searchParams`, or `dynamic = "force-dynamic"`) in the file itself or in a layout above it. A comment that mentions one does not count. A page that reaches a request API only through a helper needs its own `await connection()` to pass.
+
+## 9. Settings and admin screens
+
+No new tokens and no new base components. Everything is built from sections 2 and 3 and follows the form conventions of sections 7 and 8.
+
+### Routes
+
+| Path | Route file | Screen component |
+| --- | --- | --- |
+| `/settings` | `src/app/(app)/settings/page.tsx` (with `loading.tsx`) | `SettingsScreen` in `src/components/settings/settings-screen.tsx` |
+| `/admin` | `src/app/(app)/admin/page.tsx` | `AdminScreen` in `src/components/admin/admin-screen.tsx` |
+
+Both pages call the guards themselves and the services with the user id the guards returned: `getMe` and `listProfiles` for settings, `getCapacity` and `listUsers` for admin.
+
+### Settings: parts (`src/components/settings/`)
+
+| Part | Use |
+| --- | --- |
+| `ProfileForm`, `ReviewSchedule` (`profile-form.tsx`) | Display name, timezone, review hour through `PATCH /api/me`. The timezone is a native select narrowed by a search field above it. The schedule lists the stored next review of each profile. |
+| `MarketingForm` | The product news choice through `POST /api/me/consent`, with the recorded state, time, and version. |
+| `ConsentRecord` | The recorded Terms and Privacy notice consent. Read only: no control and no form. |
+| `SecuritySection`, `PasswordForm`, `SessionsPanel`, `SessionsTable` | Change password, sign out, sign out of all other devices, and the list of logins with a sign-out for each. All through the auth client. |
+| `DataSection` | The download link to `GET /api/account/export` and the usage against each quota. |
+| `DeleteAccountForm` | The danger section. Password field, then a `ConfirmDialog`, then `authClient.deleteUser`. |
+| `RouteRefreshProvider`, `useRouteRefresh()` (`refresh-context.tsx`) | After a save a form calls `refresh()`, which is `router.refresh()` in a transition. The server renders the page again, so the usage, the next review times, and the name in the header show the stored state. Outside the provider `refresh()` does nothing, which is what lets the markup tests render a screen without the app router. |
+
+### Helpers (pure, tested in `tests/unit/account/`)
+
+| Function | Result |
+| --- | --- |
+| `formatBytes(bytes)` (`settings/format.ts`) | `"512 bytes"`, `"1.5 KB"`, `"20 MB"`. 1 KB is 1,024 bytes, as in the Terms. `"Unknown"` for a missing size, never zero. |
+| `formatDateTime(iso, timeZone?)` | `"30 Sep 2026, 14:05 (Europe/Berlin)"`. Falls back to UTC, and says UTC, for a zone the runtime does not know. |
+| `quotaState(used, limit)` | `{ level, label, tone, remaining }` with level `ok`, `near` (from 80 percent), `reached`, or `unknown`. A reached quota is a paused state: its tone is `warning`, never `danger`. |
+| `documentConsentSummary`, `marketingSummary` (`settings/consent-summary.ts`) | The wording of the consent log. A record is granted only for the boolean `true`, and current only when the version equals the current one in full. |
+| `buildMarketingRequest(choice, shownVersion)`, `describeMarketingRefusal(failure)` | The body of the product news request, and what to show when it is refused. |
+| `buildTimezoneList(current, intl?)`, `filterTimezones(zones, query, selected)` (`settings/timezones.ts`) | The zones to offer and the search over them. |
+| `buildDeletionRequest(password)`, `deleteAccount(call, password)` (`settings/deletion.ts`) | The gate in front of account deletion and the outcome to show. |
+| `validatePasswordChange`, `describeSecurityError`, `sessionRows`, `describeUserAgent` (`settings/security.ts`) | The rules of the Security section. |
+| `capacityItems(capacity, now)` (`admin/capacity.ts`) | The six readings of the capacity report, each with its state in words and `paused: true` when it pauses something. |
+| `adminUserRow`, `adminUsersPath`, `loadUsers`, `readUsersPage`, `describeResultCount` (`admin/users.ts`) | The accounts table: one row in words, the address of a page of the route, and the check of what the route answered. |
+
+### Rules
+
+- **Product news is a separate choice.** `buildMarketingRequest` sends `{ granted: true, version }` for a grant and `{ granted: false }` for a withdrawal, and nothing else. The choice must be a boolean: `"true"`, `"on"`, `1`, and a missing value build no request. A grant names the version the page was rendered with (`versions.marketing` from the page), never one looked up when sending. A withdrawal needs no version, so turning product news off always works. The form shows the state the server returned, never the state it hoped for.
+- **Account deletion fails closed.** `deleteAccount` builds a request only for a password that is text and not empty, and it is asked twice: when the form is submitted (the dialog does not open without a password) and again when the dialog is confirmed. Nothing is sent otherwise. The account counts as deleted only when the server answers `success: true`. A refusal is shown with the server's own message followed by "Your account was not deleted." On success the browser loads `/` with a full navigation (`loadPage`).
+- **Session tokens never reach the markup.** The list of logins is read in the browser through `authClient.listSessions()` after the page is open, so no token is part of the page the server sends. `SessionsTable` renders the device name, the address, and the times. The device name comes from a fixed list of words (`describeUserAgent`); the browser description itself is chosen by the device and is never shown.
+- **The list of logins needs a recent sign-in.** Better Auth answers `SESSION_NOT_FRESH` for a login older than one day. The section then says so and keeps "Sign out of all other devices" available.
+- **Changing the password signs every other device out.** `buildPasswordChangeRequest` always sets `revokeOtherSessions: true`.
+- **A reached quota is a paused state.** `DataSection` shows it with a badge in words and a notice that names what is paused and what ends the pause. Nothing leads to a paid tier.
+- **The timezone list comes from the server.** The page calls `buildTimezoneList(me.timezone)`, which reads `Intl.supportedValuesOf("timeZone")` and falls back to a fixed list of common zones when the runtime cannot list its own. The current value is always offered and always stays in the filtered list.
+- **Focus after a successful save** returns to the submit button, next to the `role="status"` line that says what was saved. The fields were disabled during the request, which drops focus otherwise.
+
+### Admin
+
+- `src/app/(app)/admin/page.tsx` calls `requireAdmin(await headers())` and calls `notFound()` for everyone else. There is no "forbidden" page. The admin services run only after the guard passed.
+- `generateMetadata` returns the title of the not-found page for everyone but the admin, so the title gives nothing away either. Do not give this page a static `metadata` title.
+- Do not add a `loading.tsx` to the admin segment. A streamed response is sent with status 200, so the not-found page could no longer answer 404.
+- The first page of accounts comes with the screen. Search and the other pages are read from `GET /api/admin/users` by `UsersPanel`, which keeps the last good list next to a failure.
+- The screen is read only: its only controls search the accounts and page through them. It shows no password, token, roster, or Instagram username, and `adminUserRow` builds a row field by field so nothing else can reach the page.
+- Times on the admin screen are UTC. Times on the settings screen are in the account's own timezone.
+
+### Checks
+
+```
+corepack yarn vitest run --project unit tests/unit/account
+corepack yarn vitest run --project integration tests/integration/api/screens-settings.test.ts tests/integration/api/screens-pages.test.ts
+```
+
+`screens-settings.test.ts` sends what the settings forms build to the real routes and to the real Better Auth client. `screens-pages.test.ts` calls the two page functions the way Next.js does, with only `headers()` from `next/headers` replaced by the headers of the visitor each test describes. Neither replaces a browser: check the forms by hand at 360px and 1440px, including focus after a refused submit and the dialog in front of account deletion.
+
+## 10. Workspace: dashboard, profile, import
+
+Added with the workspace phase. No new tokens and no new base components: everything below is built from sections 2 and 3.
+
+### Routes
+
+| Path | Route file | Screen |
+| --- | --- | --- |
+| `/dashboard` | `src/app/(app)/dashboard/page.tsx` (with `loading.tsx`) | `DashboardScreen` in `src/components/dashboard/dashboard-screen.tsx` |
+| `/profiles` | `src/app/(app)/profiles/page.tsx` | Redirects to the dashboard |
+| `/profiles/[id]` | `src/app/(app)/profiles/[id]/page.tsx` | `ProfileScreen` in `src/components/profile/profile-screen.tsx`, one section per `?tab=` |
+| `/profiles/[id]/import` | `src/app/(app)/profiles/[id]/import/page.tsx` | `ImportFlow` in `src/components/import/import-flow.tsx` |
+
+Every page calls `workspaceUser()` (`src/components/dashboard/workspace-access.ts`), which asks the guards and redirects exactly as the layout does. The user id it returns is the only user id a page hands to a service.
+
+### Not found is decided before anything is streamed
+
+`loadOwnedProfile(id)` in `src/app/(app)/profiles/[id]/load.ts` is the one way a profile page gets its profile. A malformed id, an id that does not exist, and an id of another account all end in `notFound()`, and `src/app/(app)/profiles/[id]/not-found.tsx` renders the same page for the three. The check runs before any `Suspense` boundary, so the response status is 404. For that reason there is no `loading.tsx` under `profiles/[id]`: a loading file would start the stream and turn the status into 200. The sections load behind a `Suspense` boundary below the header instead. `generateMetadata` uses the same memoized call, so a foreign id never gets a profile title.
+
+### State lives in the address
+
+Tabs, search text, filters, and the page number are query parameters, read by pure functions in `src/components/dashboard/query.ts` (`readPage`, `readChoice`, `readSearch`, `buildHref`). A value the page does not know is ignored and never fails the page. The activity filter `profile` is accepted only for one of the user's own profile ids.
+
+`FilterForm` (`src/components/dashboard/filter-form.tsx`) is a GET form on `next/form`: it works without scripts and keeps the scroll position with them. Give it a `key` built from the current values, so its uncontrolled fields follow the address after a link changed it.
+
+### Models (pure, tested in `tests/unit/workspace/`)
+
+| Module | What it decides |
+| --- | --- |
+| `dashboard/local-time.ts` | `formatLocalTime(iso, zone)` gives `20 Sep 2026, 12:00 (America/Chicago)`: every time on these screens names its timezone. `localInputToIso(value, zone)` turns the value of a date and time control into an ISO string with that timezone's offset. |
+| `dashboard/card-model.ts` | `profileCard(profile, extras)`: the evidence badge, the counts (`null` stays "Unknown"), the source line, coverage wording ("declared by you"), the times, and the processing, failure, and paused states. `profileFailure` reports a failure only while no later job has succeeded, and always as two statements: the failure and the last success. |
+| `dashboard/activity-model.ts` | The feed rows (the wording itself comes from the service), the filter options, `readActivityQuery`, `activityHref`. |
+| `dashboard/api.ts` | `requestJson` for the JSON routes. `describeRefusal` keeps the route's message and adds the remaining cooldown or the local time a daily limit starts again. |
+| `profile/rows.ts` | `triState` (Yes, No, Unknown), `changeRow` and `observedInterval` ("Observed in your export between A and B (zone)"), `changesState` (no import, undated, baseline, pending, none observed, no match, list), `snapshotRow`, `countRows`, the tabs, `removalDescription`. |
+| `import/model.ts` | `classifySelection` (what is read and what is ignored, before any content is loaded), `parseSelection` (the domain rule `parseExportFiles` with the hosted limits), `summarizeImport`, `readCaptureInput`, `coveragePreview`, `buildImportRequest`, `describeReceipt`, `processingOutcome`, `importQuota`. |
+
+### Rules
+
+- A client module (`"use client"`) exports components only. A constant that a server component needs lives in a plain module: a server component that imports a value from a client module gets a reference, not the value. `ADD_PROFILE_FIELD_ID` is in `card-model.ts` for that reason.
+- A workspace page shows `observedInterval`, which carries the two capture times with the timezone. `observedBetween` from section 3 stays the wording for dates only. Both read "observed in your export between".
+- The differences list calls a row "New in followers list" or "Gone from followers list". It never says follow, unfollow, or a point in time, and each row carries the badge "Export observation".
+- A count trend and the net change wording come from the count history of the service. No component turns a count into usernames.
+- After a mutation through the JSON API the screen calls `router.refresh()`. Removing a profile uses `loadPage("/dashboard")`, so nothing rendered for the removed profile stays on screen.
+- While an import is processed, `ProcessingWatcher` and `ImportFlow` ask `GET /api/profiles/:id` every two seconds, at most 45 times, and announce the result in a `role="status"` region that is mounted from the start.
+- The import reads only files the domain rule would recognize. Everything else in a chosen folder is listed as ignored and its content is never loaded. A ZIP is handed to the domain rule as it is.
+- The capture time field is a date and time control labelled with the account timezone. What is sent is shown under it as an ISO string with the offset.
+
+### Checks
+
+```
+corepack yarn vitest run --project unit tests/unit/workspace
+```
+
+In a browser, at 360px and 1440px: add a profile, import a first export (the receipt says baseline and the Changes section has no rows), import a later one (the rows read "Observed in your export between"), then sign in as another account and open the first account's profile address (the not-found page, status 404). A Suspense boundary of a freshly loaded page is revealed on an animation frame, so a tab that is not visible keeps the loading state until it is shown.
+
+## 11. `/admin`: who gets which answer
+
+This section replaces two earlier sentences: "`/admin` answers 404 to everyone else" in section 4, and the first bullet under Admin in section 9. Both describe what the page function does. What a visitor gets is decided in three places, in the order of the table. `/admin` is one of the signed-in areas, so the proxy and the signed-in layout treat it as they treat `/settings`.
+
+| Visitor | Decided by | Answer |
+| --- | --- | --- |
+| No session cookie | The proxy (`signInRedirect` in `src/server/auth/paths.ts`) | Redirect to `/sign-in?next=%2Fadmin` |
+| A session cookie that is not a valid session (forged, revoked, expired) | The signed-in layout (`resolvePageAccess`) | Redirect to `/sign-in?next=%2Fadmin` |
+| Signed in, address not verified | The signed-in layout | Redirect to `/verify-email` |
+| Signed in, suspended | The signed-in layout | The suspended notice in place of the page, status 200, titled "Account suspended" |
+| Signed in, not onboarded or consent not current, the admin included | The signed-in layout | Redirect to `/onboarding` |
+| Signed in, verified, active, onboarded, not the admin | The page (`requireAdmin`, then `notFound()`) | The not-found page, status 404, titled "Page not found" |
+| The admin | The page | The admin screen, titled "Admin" |
+
+- The 404 is the answer for a signed-in, verified, active, onboarded account that is not the admin. There is no "forbidden" page.
+- The first five answers differ from the answer for an address that does not exist, so they show that `/admin` is a page of this app. That is no secret: the route is named in this repository. None of them carries admin data. `getCapacity` and `listUsers` run only after `requireAdmin` passed, and they check the admin's id again themselves.
+- `/api/admin/*` has no proxy redirect and no layout in front of it: those routes answer 404 to everyone but the admin, signed in or not.
+- On a navigation inside the app the layout is not rendered again, so the page function answers alone: `notFound()` for every request that does not pass `requireAdmin`, and onboarding for an admin who is not onboarded. Keep the guard in the page.
+- A deployment that is not configured has no accounts. The proxy still sends a request without a session cookie to `/sign-in?next=%2Fadmin`, and the layout sends every other request to `/sign-in`.
+- The title comes from `adminMetadata(visitor)` in `src/components/admin/page-metadata.ts`: "Admin" for the admin only, "Account suspended" for the suspended notice, and the title of the not-found page for everyone else, including a value the function does not know. `generateMetadata` asks `resolvePageAccess` whether the layout shows the suspended notice, so the title cannot disagree with the layout.
+- `docs/web/design.md` section 7 has the short form: "Everyone else gets 404 on `/admin` and `/api/admin/*`". It holds as written for `/api/admin/*`. For `/admin` it holds for an account that reaches the page, which is the sixth row. The rows above it are answered first.
+
+### Checks
+
+```
+corepack yarn vitest run --project unit tests/unit/account/admin-access.test.ts tests/unit/server/proxy.test.ts tests/unit/server/paths.test.ts
+corepack yarn vitest run --project integration tests/integration/auth/page-access.test.ts tests/integration/api/screens-pages.test.ts
+```
+
+`admin-access.test.ts` pins the title rule, and it pins the table above to the proxy's own decision (`signInRedirect`) and to the path constants, so a change to either fails until this section is changed with it. `proxy.test.ts` and `paths.test.ts` pin `/admin` as a signed-in area. `page-access.test.ts` pins what the layout does with `/admin` for a suspended account and for an account that is not onboarded.
+
+`screens-pages.test.ts` calls the page function alone. Its cases for a visitor who is not signed in, for a forged cookie, for a suspended admin, and for an account that is not onboarded show what the page answers by itself, as on a navigation inside the app. They do not show what a full page load of `/admin` ends in: the table does.
+
+## 12. Workspace: a stale export, and the page tests
+
+This section adds to section 10. Where the two differ, this one holds: the `card-model.ts` row of the models table there still says "the evidence badge", and the check there lists the unit command only.
+
+### Age is decided apart from coverage
+
+The evidence status the service returns (`ProfileDto.evidence`) is `degraded` for every export with a direction that is not complete, whatever its age, and the profile data carries no stale flag of its own. One declaration box left unticked is enough for that, so the status alone would never call such an export stale while the count of the complete direction is still shown. The interface therefore decides the age itself, in `src/components/dashboard/card-model.ts`:
+
+| Function | What it decides |
+| --- | --- |
+| `exportAge(profile, now)` | `none` before the first import, `undated` without a capture time, `stale` once the capture time is more than `LIMITS.staleAfterMs` (36 hours) back, otherwise `fresh`. The same rule as the `stale` flag of `buildView` in `src/domain/export/snapshot.ts`. |
+| `staleNote(profile, now)` | The sentence about the age, or `null`. An undated export is stale and is never given an age: its sentence says the capture time is missing. A status of `stale` from the service stands even when the clock of the page would disagree. |
+| `statusBadges(profile, now)`, `statusNotes(profile, now)` | The evidence badge and note, and "Stale" with its sentence next to them when the evidence status does not say so itself. An old export with incomplete coverage reads "Incomplete coverage" and "Stale". |
+| `staleBanner(cards)` | The banner above the dashboard cards: every profile whose export is stale, whatever its coverage. |
+
+- The clock is a parameter. `profileCard` takes it as `extras.now` and `ProfileScreen` as the `now` prop. The dashboard page hands in the `now` it gave `listProfiles`; `loadOwnedProfile` reads the profile with one `now` and returns it. Evidence and age are judged at the same instant that way. Do not call `new Date()` in a model or a screen.
+- `now` is a `Date` and stays on the server: `profileCard` turns it into a boolean, badges, and sentences before anything reaches a client component.
+- `ProfileCardModel` has `badges` and `notes` (lists) in place of one badge and one note. `stale` is true for an old or undated export at any coverage.
+- A profile page shows the stale notice and the coverage notice as two notices when both apply.
+
+### Page tests
+
+`tests/unit/workspace/pages.test.ts` calls the dashboard page, the profile page, the import page, both `generateMetadata` functions, `loadOwnedProfile`, and `workspaceUser` the way Next.js does, as two accounts, with only `headers()` from `next/headers` replaced. It pins:
+
+- a foreign profile id, a well-formed id of nothing, and malformed ids all end in the not-found error, for the page and for the title, and cannot be told apart;
+- no title carries a handle for anyone but the owner, a suspended owner included;
+- the dashboard shows the visitor's own cards and feed, and drops a `?profile=` that names another account's profile, names nothing, or is malformed;
+- a visitor who is not signed in is sent to sign-in, an account that is not onboarded to onboarding, and a suspended account gets nothing from the page;
+- an old export with one direction not declared complete is marked stale on the dashboard and on the profile page, from the import to the markup.
+
+The file lives under `tests/unit` with the other workspace tests, and the unit project starts no database. It brings its own through `tests/unit/workspace/support/database.ts`, which reuses `tests/setup/global-db.ts` and `tests/setup/integration-env.ts`: one throwaway Postgres for the file, never `TEST_DATABASE_URL`. It adds a few seconds to the unit run. `tests/unit/workspace/screens.test.ts` renders `ProfileCard`, `DashboardScreen`, and `ProfileScreen` to markup with `renderScreen` from `support/render.ts`, which supplies the router context the client components ask for.
+
+`workspaceUser()` reads the requested path through `requestedPathname()`, as the signed-in layout does. A path header on a request that did not come through the proxy is ignored, so it cannot choose the page sign-in returns to.
+
+```
+corepack yarn vitest run --project unit tests/unit/workspace
+```
