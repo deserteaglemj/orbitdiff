@@ -7,7 +7,7 @@ import stat
 import tarfile
 import zipfile
 from collections import Counter
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 MAX_MEMBER_SIZE = 10 * 1024 * 1024
 TEXT_PATTERNS = (
@@ -21,6 +21,7 @@ SENSITIVE_NAME = re.compile(
     re.IGNORECASE,
 )
 TOKEN = re.compile(r"[A-Za-z0-9_+=-]{40,}")
+PRIVATE_COMPONENTS = {".ssh", ".git", ".hermes", ".remember"}
 
 
 def entropy(value: str) -> float:
@@ -31,7 +32,12 @@ def entropy(value: str) -> float:
 
 def _unsafe_path(name: str) -> bool:
     path = PurePosixPath(name)
-    return path.is_absolute() or ".." in path.parts
+    return (
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in name
+        or bool(PureWindowsPath(name).drive)
+    )
 
 
 def _scan_text(name: str, content: bytes, forbidden: list[str]) -> list[str]:
@@ -49,8 +55,11 @@ def _scan_member(name: str, size: int, content: bytes, forbidden: list[str]) -> 
     findings: list[str] = []
     if _unsafe_path(name):
         findings.append(f"unsafe archive path: {name}")
-    if SENSITIVE_NAME.search(PurePosixPath(name).name):
-        findings.append(f"sensitive filename: {name}")
+    if any(
+        part.casefold() in PRIVATE_COMPONENTS or SENSITIVE_NAME.search(part)
+        for part in PurePosixPath(name).parts
+    ):
+        findings.append(f"sensitive filename or ancestor: {name}")
     if size > MAX_MEMBER_SIZE:
         findings.append(f"member too large: {name}")
         return findings
