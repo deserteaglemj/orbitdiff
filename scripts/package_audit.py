@@ -71,6 +71,7 @@ def _scan_zip(path: Path, forbidden: list[str]) -> list[str]:
     with zipfile.ZipFile(path) as archive:
         for member in archive.infolist():
             if member.is_dir():
+                findings.extend(_scan_member(member.filename, 0, b"", forbidden))
                 continue
             mode = member.external_attr >> 16
             if member.create_system == 3 and stat.S_IFMT(mode) not in (0, stat.S_IFREG):
@@ -86,6 +87,7 @@ def _scan_tar(path: Path, forbidden: list[str]) -> list[str]:
     with tarfile.open(path) as archive:
         for member in archive.getmembers():
             if member.isdir():
+                findings.extend(_scan_member(member.name, 0, b"", forbidden))
                 continue
             if not member.isfile():
                 findings.append(f"unsafe archive member type: {member.name}")

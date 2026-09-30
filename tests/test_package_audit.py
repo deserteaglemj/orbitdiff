@@ -126,3 +126,22 @@ def test_package_audit_rejects_private_ancestors(tmp_path: Path, name: str, kind
 
     assert result.returncode == 1
     assert "sensitive" in result.stdout
+
+
+@pytest.mark.parametrize("name", ["../../outside/", "C:/outside/", "orbitdiff/.ssh/"])
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_package_audit_checks_directory_entries(tmp_path: Path, name: str, kind: str) -> None:
+    archive = tmp_path / ("candidate.zip" if kind == "zip" else "candidate.tar.gz")
+    if kind == "zip":
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr(name, b"")
+    else:
+        with tarfile.open(archive, "w:gz") as bundle:
+            member = tarfile.TarInfo(name)
+            member.type = tarfile.DIRTYPE
+            bundle.addfile(member)
+
+    result = run_audit(archive)
+
+    assert result.returncode == 1
+    assert "unsafe archive path" in result.stdout or "sensitive" in result.stdout
