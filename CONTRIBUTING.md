@@ -15,12 +15,12 @@ mypy src
 
 ## Scope
 
-Keep v0.1 focused on confirmed changes in public following lists. Do not add private-profile access, account actions, password handling, browser data import, cloud sync, telemetry, a daemon, content collection, or identity enrichment.
+Keep owner-supplied personal relationship exports separate from confirmed changes in other accounts' public following lists. Both workflows use local storage and read-only Instagram access. Do not add private-profile collection, account actions, password handling, browser data import, cloud sync, telemetry, a daemon, content collection, or identity enrichment.
 
 ## Pull requests
 
 - Add a focused test before behavior changes and run it red before implementation.
-- Keep storage limited to the documented public account and event fields.
+- Keep storage limited to the documented personal snapshot, public account, and event fields. Personal exports remain local.
 - Preserve complete-collection and two-scan confirmation behavior.
 - Run the full local verification set before opening a pull request.
 - Use synthetic handles and data in tests, docs, and screenshots.
