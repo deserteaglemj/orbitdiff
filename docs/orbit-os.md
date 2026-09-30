@@ -1,14 +1,16 @@
-# Orbit OS operating guide
+# Orbit OS compatibility guide
+
+This page describes the explicit `--hermes-home PATH` compatibility reader. The default Orbit OS workspace uses portable personal exports and public watchlists. For that workflow, start with the [README](../README.md) and [command reference](../skills/orbitdiff/references/commands.md).
 
 ## Architecture
 
-The app has three independent pieces:
+Compatibility mode has three independent pieces:
 
 1. Existing collectors produce durable local artifacts on their existing schedules.
 2. A standard-library Python adapter reads those artifacts into a sanitized view model.
 3. A browser interface requests that view model from a loopback-only Python server.
 
-No collector is imported or executed by the server. No provider request or outbound message occurs when the app starts, refreshes, or exports a view. Only explicit Instagram profile links open an external site.
+Compatibility mode never executes a collector. No provider request or outbound message occurs when the app starts, refreshes, or exports a view. Explicit Instagram profile links open an external site. The separate portable mode also offers a protected, user-requested public scan action.
 
 Personal SQLite reads use a private temporary snapshot of the database and optional write-ahead log. Source file identities, sizes, and modification timestamps must remain stable across the copy. Changing sources retry a bounded number of times, then fail closed. SQLite opens only the copy, so it cannot create WAL helper files in the source directory. The temporary snapshot is removed after the read.
 
@@ -52,16 +54,16 @@ The server binds only to `127.0.0.1`. Host and Origin checks resist browser-base
 From the checkout:
 
 ```bash
-PYTHONPATH=src python3 -m orbit_os --open
+PYTHONPATH=src python3 -m orbit_os app --hermes-home PATH --open
 ```
 
-The terminal owns the server. Ctrl+C stops it. The macOS launcher opens the same command in Terminal. There is no launch agent or login item. The app requires Python 3.11 or newer and uses no extra runtime dependencies beyond the existing CLI's separate dependencies.
+Replace PATH with the selected compatibility source. The terminal owns this server and Ctrl+C stops it. The separate self-contained Mac app bundles its runtime and owns its window/server lifecycle. Neither route installs a launch agent or login item.
 
 Manual refresh rereads the local sources. It never retries Instagram requests. For HTTP 429, wait for the collection cooldown and inspect the collector's own recovery process. Do not repeatedly refresh or rebaseline a blocked collector.
 
 ## Repository and rollback
 
-The source history is preserved from the OrbitDiff `main` branch. Orbit OS work is on the local `orbit-os` branch. No remote rename, push, or publication is necessary to run it.
+The source history is preserved from OrbitDiff. No remote rename, push, or publication is necessary to run compatibility mode locally.
 
 The import transaction changed only this checkout's Git state and app files. No source artifacts were moved, copied into the checkout, or modified. The rollback boundary is the Git commit titled `Checkpoint OrbitDiff before Orbit OS app`. To undo application changes, revert the later app commit after stopping the local server. The existing collectors and schedules continue independently.
 
@@ -76,7 +78,7 @@ python3 -m pytest -q
 python3 -m ruff check .
 python3 -m mypy src
 python3 -m build
-python3 scripts/package_audit.py dist/*
+python3 scripts/package_audit.py dist/*.whl dist/*.tar.gz dist/orbitdiff-skill-*.zip
 python3 scripts/public_safety_scan.py .
 gh skill publish --dry-run .
 ```
