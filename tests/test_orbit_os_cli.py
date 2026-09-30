@@ -6,6 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from orbit_os.workspace import ensure_workspace
+
 
 def run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"))
@@ -86,3 +90,14 @@ def test_doctor_reports_corrupt_personal_state_as_not_ready(tmp_path: Path) -> N
     assert payload["ready"] is False
     assert payload["personal_status"] == "error"
     assert any(item["code"] == "personal_unreadable" for item in payload["issues"])
+
+
+def test_workspace_rejects_case_variant_protected_paths_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mutations: list[str] = []
+    monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: mutations.append("mkdir"))
+    monkeypatch.setattr(Path, "chmod", lambda *_args, **_kwargs: mutations.append("chmod"))
+    with pytest.raises(OSError, match="protected"):
+        ensure_workspace(tmp_path / ".ENV" / "workspace")
+    assert mutations == []

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -13,22 +12,15 @@ from typing import Any
 
 from platformdirs import user_data_dir
 
+from orbitdiff.paths import ensure_private_directory
+
 
 def default_workspace() -> Path:
     return Path(user_data_dir("orbit-os", appauthor=False))
 
 
 def ensure_workspace(path: Path) -> Path:
-    path = path.absolute()
-    for component in (path, *path.parents):
-        if component.name == ".ssh" or component.name == ".env" or component.name.startswith(".env."):
-            raise ValueError("Choose an application workspace, not a protected location.")
-        if component.is_symlink():
-            raise ValueError("Choose a workspace without symbolic links.")
-    path.mkdir(parents=True, exist_ok=True)
-    if os.name != "nt":
-        path.chmod(0o700)
-    return path
+    return ensure_private_directory(path)
 
 
 def load_workspace(workspace: Path) -> dict[str, Any]:
