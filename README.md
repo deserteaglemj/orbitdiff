@@ -6,13 +6,13 @@ Curious whether your crush or partner started following someone new on Instagram
 
 See the public handle, when a change was first observed, and when a later observation confirmed it. Those dates describe what OrbitDiff observed, not the exact moment someone tapped Follow. A follow alone does not explain why.
 
-![OrbitDiff: Who did they follow? Synthetic graph and example for pixel_forge, first observed September 29 at 09:00 UTC and confirmed September 30 at 09:00 UTC. Confirmation needs two matching complete observations. Offline developer preview.](docs/social-preview.jpg)
-
-*Synthetic illustration created with ChatGPT Image, not an app screenshot or live result.*
-
 **[Try the offline demo with your agent](docs/prompt.md)**
 
 Start with synthetic data. No Instagram login or personal export is needed. **Developer preview:** live collection remains Unproven under the [release criteria](docs/release-readiness.md). After a baseline, public changes need **two matching complete observations** to be confirmed. Installation and demos do not prove live tracking.
+
+![OrbitDiff: Who did they follow? Synthetic graph and example for pixel_forge, first observed September 29 at 09:00 UTC and confirmed September 30 at 09:00 UTC. Confirmation needs two matching complete observations. Offline developer preview.](docs/social-preview.jpg)
+
+*Synthetic illustration created with ChatGPT Image, not an app screenshot or live result.*
 
 ## From a following list to a clear change
 
