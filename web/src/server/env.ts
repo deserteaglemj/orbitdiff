@@ -23,6 +23,11 @@ export interface Env {
   emailTransport: EmailTransport;
   mailboxSecret: string | null;
   signupAccessCode: string | null;
+  /**
+   * Who runs this deployment, as shown on the legal pages. Null until the
+   * operator sets OPERATOR_NAME: registration stays closed while it is null.
+   */
+  operatorName: string | null;
   capacity: { maxUsers: number; maxJobsPerDay: number; maxDatabaseBytes: number };
   /**
    * Lowercased name of the request header that carries the client address.
@@ -65,8 +70,29 @@ const HEADER_SHAPE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Headers that carry credentials can never be the client address header. */
 const CREDENTIAL_HEADERS = new Set(["cookie", "authorization", "proxy-authorization", "x-signup-code"]);
 const DEFAULT_CLIENT_IP_HEADER = "x-forwarded-for";
+const OPERATOR_NAME_MIN = 2;
+const OPERATOR_NAME_MAX = 80;
 
 type Source = Record<string, string | undefined>;
+
+/**
+ * The operator name as it may be shown, or null. It fails closed: anything that
+ * is not a string of 2 to 80 characters after trimming counts as "not named".
+ */
+export function normalizeOperatorName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name.length >= OPERATOR_NAME_MIN && name.length <= OPERATOR_NAME_MAX ? name : null;
+}
+
+/**
+ * Read OPERATOR_NAME on its own. The legal pages use this, so they can say who
+ * runs the service (or that nobody has been named) on a deployment whose other
+ * configuration is missing.
+ */
+export function readOperatorName(source: Source = process.env): string | null {
+  return normalizeOperatorName(source.OPERATOR_NAME);
+}
 
 export function parseEnv(source: Source): Env {
   const problems: Array<{ name: string; reason: string }> = [];
@@ -132,6 +158,12 @@ export function parseEnv(source: Source): Env {
     fail("SIGNUP_ACCESS_CODE", `must be at least ${ACCESS_CODE_MIN} characters`);
   }
 
+  const operatorRaw = read("OPERATOR_NAME");
+  const operatorName = normalizeOperatorName(operatorRaw);
+  if (operatorRaw !== null && operatorName === null) {
+    fail("OPERATOR_NAME", `must be ${OPERATOR_NAME_MIN} to ${OPERATOR_NAME_MAX} characters`);
+  }
+
   const capacity = {
     maxUsers: readCount("CAPACITY_MAX_USERS", CAPACITY_DEFAULTS.maxUsers, read, fail),
     maxJobsPerDay: readCount("CAPACITY_MAX_JOBS_PER_DAY", CAPACITY_DEFAULTS.maxJobsPerDay, read, fail),
@@ -166,6 +198,7 @@ export function parseEnv(source: Source): Env {
     emailTransport,
     mailboxSecret: mailboxSecret || null,
     signupAccessCode,
+    operatorName,
     capacity,
     clientIpHeader,
     trustedProxies,

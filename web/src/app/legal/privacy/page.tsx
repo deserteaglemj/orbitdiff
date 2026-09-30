@@ -5,6 +5,9 @@ import { LegalDocument, type LegalSection } from "@/components/legal-document";
 import { REPOSITORY_URL } from "@/components/site-footer";
 import { formatCount } from "@/components/ui/format";
 import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
+import { readOperatorName } from "@/server/env";
+
+import { OperatorStatement } from "../operator-statement";
 
 export const metadata: Metadata = {
   title: "Privacy notice",
@@ -12,16 +15,18 @@ export const metadata: Metadata = {
     "What OrbitDiff Web collects and why, what it never collects, how long it keeps data, and how to export or delete it.",
 };
 
-const sections: LegalSection[] = [
+/** `operatorName` is the configured OPERATOR_NAME, or null when no operator has been named. */
+const buildSections = (operatorName: string | null): LegalSection[] => [
   {
     id: "who",
     title: "Who runs OrbitDiff Web",
     body: (
       <>
         <p>
-          OrbitDiff Web is a free, non-commercial preview run by the maintainer of the open source OrbitDiff project.
-          It shows no advertising and takes no payment.
+          OrbitDiff Web is a free, non-commercial preview built from the open source OrbitDiff project. It shows no
+          advertising and takes no payment.
         </p>
+        <OperatorStatement operatorName={operatorName} />
         <p>
           OrbitDiff Web is not affiliated with, endorsed by, or connected to Instagram or Meta. An OrbitDiff account
           is separate from any Instagram account.
@@ -264,13 +269,18 @@ const sections: LegalSection[] = [
   },
 ];
 
+/**
+ * The operator name is read on its own, at request time (the legal layout opts
+ * out of static rendering), so this page also renders on a deployment whose
+ * other configuration is missing.
+ */
 export default function PrivacyPage() {
   return (
     <LegalDocument
       title="Privacy notice"
       version={CONSENT_VERSIONS.privacy}
       summary="OrbitDiff Web stores your sign-in details and the follower and following usernames from the exports you import, only to show you your own relationship lists. It never asks for Instagram credentials, and you can export or delete everything from Settings."
-      sections={sections}
+      sections={buildSections(readOperatorName())}
     />
   );
 }

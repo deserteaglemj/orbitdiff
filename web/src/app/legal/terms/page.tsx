@@ -6,6 +6,9 @@ import { LegalDocument, type LegalSection } from "@/components/legal-document";
 import { REPOSITORY_URL } from "@/components/site-footer";
 import { formatCount } from "@/components/ui/format";
 import { CONSENT_VERSIONS, LIMITS } from "@/domain/limits";
+import { readOperatorName } from "@/server/env";
+
+import { OperatorStatement } from "../operator-statement";
 
 export const metadata: Metadata = {
   title: "Terms of use",
@@ -16,7 +19,18 @@ export const metadata: Metadata = {
 const megabytes = (bytes: number) => formatCount(bytes / (1024 * 1024));
 const minutes = (ms: number) => formatCount(ms / (60 * 1000));
 
-const sections: LegalSection[] = [
+/** `operatorName` is the configured OPERATOR_NAME, or null when no operator has been named. */
+const buildSections = (operatorName: string | null): LegalSection[] => [
+  {
+    id: "operator",
+    title: "Who operates this deployment",
+    body: (
+      <>
+        <OperatorStatement operatorName={operatorName} />
+        <p>In these terms, the operator is whoever runs this deployment of OrbitDiff Web.</p>
+      </>
+    ),
+  },
   {
     id: "service",
     title: "What OrbitDiff Web is",
@@ -214,7 +228,7 @@ export default function TermsPage() {
       title="Terms of use"
       version={CONSENT_VERSIONS.terms}
       summary="OrbitDiff Web is a free, non-commercial preview that works from the Instagram exports you import. These terms say what it does, what its results mean, and what is expected of you."
-      sections={sections}
+      sections={buildSections(readOperatorName())}
     />
   );
 }

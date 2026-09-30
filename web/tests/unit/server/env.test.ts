@@ -41,6 +41,7 @@ describe("parseEnv", () => {
       emailTransport: "none",
       mailboxSecret: null,
       signupAccessCode: null,
+      operatorName: null,
       capacity: { ...CAPACITY_DEFAULTS },
       clientIpHeader: "x-forwarded-for",
       trustedProxies: [],

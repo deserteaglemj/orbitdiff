@@ -208,3 +208,111 @@ corepack yarn typecheck
 ```
 
 The component tests cover the token contrast table, the sparkline geometry and summary, the pagination entries, and the formatters. `copy.test.ts` renders the landing page, the privacy notice, the terms, and `CapabilityNotice` to static markup and checks the claims listed under Wording. Layout is checked in the browser at 360px and 1440px.
+
+## 7. Account screens and onboarding
+
+Added with the account phase. No new tokens and no new base components: everything below is built from sections 2 and 3.
+
+### Routes
+
+| Path | Route file | Screen component |
+| --- | --- | --- |
+| `/sign-up` | `src/app/(auth)/sign-up/page.tsx` | `SignUpScreen` in `src/components/auth/sign-up-screen.tsx` |
+| `/sign-in` | `src/app/(auth)/sign-in/page.tsx` | `SignInScreen` |
+| `/verify-email` | `src/app/(auth)/verify-email/page.tsx` | `VerifyEmailScreen` (states `waiting`, `opened`, `invalid`) |
+| `/forgot-password` | `src/app/(auth)/forgot-password/page.tsx` | `ForgotPasswordScreen` |
+| `/reset-password` | `src/app/(auth)/reset-password/page.tsx` | `ResetPasswordScreen` |
+| `/onboarding` | `src/app/(app)/onboarding/page.tsx` | `OnboardingFlow` in `src/components/onboarding/onboarding-flow.tsx` |
+
+A page file is an async server component that reads the query and the server state, then renders a synchronous screen component with plain props. Keep that split: the screen components are what `tests/unit/screens/markup.test.ts` renders.
+
+### Parts (`src/components/auth/`)
+
+| Part | Use |
+| --- | --- |
+| `AuthFrame` (`auth-parts.tsx`) | `title`, `lead`, `children`, `aside`. The `h1` comes from `PageHeader`. The form sits in a 28rem column; `aside` becomes a second column from 1024px and follows the form below that. Put anything that must be read before typing above the form, not in `aside`. |
+| `CapturedMailNotice` | Required wherever an account message is mentioned on a deployment that captures mail. |
+| `TextLink`, `TEXT_LINK` | Inline link with a 24px tap height. |
+| `SignOutButton` | The `signOutButton` of `AppShell`. |
+| `SuspendedScreen` | What the signed-in layout renders for a suspended account. |
+| `EmailRequestForm` | One email field and one button, for a new confirmation message or a reset message. |
+| `loadPage(path)` (`navigate.ts`) | Full navigation after the login state changed. Use it instead of `router.push` after sign-in, sign-out, sign-up, a password reset, and the last onboarding step. |
+| `useBrowserTimezone()` | The browser timezone without a hydration mismatch. |
+| `listTimezones()`, `timezoneOptions()` | The timezone list comes from the server, so the list offered is the list the server accepts. |
+
+Rules of the forms live in pure modules with tests: `sign-up-model.ts` (validation, the request body), `password-strength.ts`, `auth-errors.ts` (what to show for a refusal), `src/components/onboarding/model.ts` (which documents need a tick, the onboarding body), and `src/components/onboarding/api.ts` (the error envelope of the JSON routes).
+
+### Form conventions used by every account form
+
+- `noValidate` on the form and validation in the submit handler, so every message appears under its field (`error` prop) in the app's own words. On a failed submit, focus moves to the first field with an error.
+- `FormError` above the submit button for a failure that belongs to no field. A result that is not a failure goes in an element with `role="status"` that is mounted from the start.
+- The submit button uses `loading` and `loadingLabel`; the fields are `disabled` while the request runs.
+- Consent: one required box for the Terms and the Privacy notice at sign-up, a separate optional box for product news, never pre-ticked. `acceptedTermsVersion` is sent only when the required box is ticked. `marketingOptIn` is sent as a boolean. In onboarding, a box is shown only for a document whose recorded consent is missing, withdrawn, or not the current version (`consentToConfirm`).
+- A refusal from a JSON route is shown with the route's own message (`describeApiFailure`). A refusal from `/api/auth/*` goes through `describeAuthError`.
+- No account screen has a field about an Instagram login.
+
+### Signed-in pages
+
+`src/app/(app)/layout.tsx` calls `resolvePageAccess(await headers(), pathname)` from `src/server/auth/page-access.ts` and then redirects, renders `SuspendedScreen`, or renders `AppShell`. A layout is not rendered again on a client-side navigation, so every page under `(app)` calls `resolvePageAccess` (or the guards) itself before it loads data, as `onboarding/page.tsx` does.
+
+Destinations come from `src/server/auth/paths.ts`: `safeNextPath`, `signInPath`, `afterSignInPath`. Never navigate to a value from the query without `safeNextPath`.
+
+### Registration and mail state on a screen
+
+Read it on the server with `readPublicRegistration()` from `src/server/auth/public-state.ts`. It reports what `GET /api/health` reports (the answer of the sign-up gate), never throws, and returns `open: false` with a reason when the deployment is not configured, when no operator is named, when mail cannot be handled, and at capacity. Show the form only for `open === true`.
+
+The legal pages render `OperatorStatement` (`src/app/legal/operator-statement.tsx`) with `readOperatorName()`. Nothing about the operator is written anywhere else.
+
+### Content Security Policy
+
+`src/proxy.ts` sets a policy with a nonce that is new for every request. Consequences for every page:
+
+- No `style` attribute in markup and no inline `<script>`. Use classes. `tests/unit/screens/markup.test.ts` fails on a `style` attribute in an account screen.
+- No script, font, image, or request from another origin.
+- A page has to be rendered per request to receive the nonce. The `(auth)` and `legal` layouts call `await connection()`; the `(app)` layout reads `headers()`. A page outside those layouts needs one of the two.
+
+### Checks
+
+```
+corepack yarn vitest run --project unit tests/unit/screens tests/unit/server
+corepack yarn vitest run --project integration tests/integration/auth
+```
+
+`tests/integration/auth/screens-contract.test.ts` drives the real Better Auth client and the real routes with the bodies the forms build.
+
+## 8. Account screens: rules added after review
+
+These add to section 7. Where the two differ, this section is the current rule.
+
+### Focus after a failed submit
+
+The fields are `disabled` while a request runs, and a disabled control cannot take focus. A submit handler therefore never calls `focus()` itself: at that moment the fields are still disabled and the message is not in the document yet.
+
+- `useFocusAfterSubmit(formRef, !pending)` from `src/components/auth/use-focus-after-submit.ts` returns a function. Call it from the handler with `fieldTarget(name)` for a field with an error, or with `SUBMIT_TARGET` for a failure that belongs to no field. Focus moves after the render that enables the fields and shows the message, so the message is read out with its field (`aria-invalid` and `aria-describedby` are already set).
+- `firstFieldWithError(order, errors)` picks the first field in screen order. Keep one `FIELD_ORDER` list per form with the `name` attributes in the order they appear.
+- A field that is not on the screen, or is still disabled, cannot take focus. The submit button takes it instead, so focus is never left on the page body. Every form has exactly one `type="submit"` button (`markup.test.ts` checks it).
+- A failure without a field is shown in `FormError` (`role="alert"`) and focus returns to the submit button.
+- The rule itself is in `src/components/auth/focus-request.ts`, a pure module, and is tested in `tests/unit/screens/focus-request.test.ts`. There is no DOM test environment, so the hook is only as thin as it can be. Check a changed form by hand in a browser: submit with Enter from a field, let the server refuse (for example a wrong access code), and confirm that focus lands on that field.
+
+### Consent names the version that was shown
+
+Consent is recorded at the version the request names, never at a version the server fills in.
+
+- Sign-up: the page passes `termsVersion` and `privacyVersion` to `SignUpScreen`. The form prints both next to the agreement box and sends them as `acceptedTermsVersion` and `acceptedPrivacyVersion`, only when the box is ticked (`buildSignUpRequest(values, shown)`).
+- The sign-up gate accepts `acceptedPrivacyVersion` as an optional field. When it is sent it must be the current version of the Privacy notice, compared in full. When it is not sent, the one version the request names stands for both documents, which holds only while it is also the current version of the Privacy notice. Every other state answers 422 `PRIVACY_NOT_ACCEPTED`, and `describeAuthError` puts it on the agreement box.
+- Onboarding: the page passes `versions` to `OnboardingFlow`. The agreement step sends `{ termsVersion, privacyVersion }` with those values (`buildOnboardingBody`), and `consentToConfirm(consent, versions)` decides which boxes to show. No acceptance flag is sent.
+- A page that was open while a document changed is refused by the server. `describeAgreementRefusal` says which document changed and asks for a reload. It does not show the field names of the request.
+- Checks: `tests/integration/auth/consent-versions.test.ts` holds one probe per invalid state (missing, empty, not text, fabricated, outdated, padded, the other document's version, marketing in place of acceptance) and the stale page probes for sign-up and onboarding.
+
+### Redirect targets
+
+A value is a path on this site only after it has been resolved the way a browser resolves it. `/.//host`, `/a/..//host`, and `/%2e//host` start with one slash and still lead to another host.
+
+- `isSitePath(value)` in `src/server/auth/paths.ts` is the one test. The auth gate uses it for `callbackURL`, `redirectTo`, `errorCallbackURL`, and `newUserCallbackURL`, in the body and in the query.
+- `withErrorCode(path, code)` builds a failure redirect from the resolved path. It cannot return a value that starts with two slashes. A value that is not a site path becomes `/?error=<code>`.
+- `safeNextPath` stays the function for a destination after sign-in. It also refuses API routes.
+- Checks: `tests/unit/server/site-path.test.ts` and `tests/integration/auth/open-redirect.test.ts`.
+
+### Pages and the nonce: the check
+
+`tests/unit/server/per-request-pages.test.ts` walks `src/app` and fails when a `page.tsx` or `not-found.tsx` has no request API (`await connection()`, `await headers()`, `await cookies()`, an awaited `searchParams`, or `dynamic = "force-dynamic"`) in the file itself or in a layout above it. A comment that mentions one does not count. A page that reaches a request API only through a helper needs its own `await connection()` to pass.

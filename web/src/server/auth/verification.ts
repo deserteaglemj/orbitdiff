@@ -9,6 +9,7 @@ import { getDb } from "@/server/db/client";
 import { account, user } from "@/server/db/schema";
 
 import { isRecord, type GateContext } from "./gate-context";
+import { isSitePath, withErrorCode } from "./paths";
 
 /**
  * How an email address gets verified here, and why it is not the Better Auth default.
@@ -59,21 +60,19 @@ async function holdsProof(ctx: GateContext, address: string): Promise<boolean> {
   return digest === addressDigest(address) && Number(expires) > nowSeconds();
 }
 
-/** Add `error=<code>` to a callback path that the gate has already checked. */
-function withError(callbackPath: string, code: string): string {
-  const url = new URL(callbackPath, "http://app.invalid");
-  url.searchParams.set("error", code);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
 /**
  * Answer GET /verify-email. Always ends in a redirect to the callback path, so
  * Better Auth's own handler (which would verify on the click and could sign the
  * clicker in) never runs.
+ *
+ * This endpoint needs no token, cookie, or Origin header to be reached, so the
+ * callback is checked here as well as in the gate: a value that is not a path
+ * on this site is replaced by the home page, and the failure redirects are
+ * built by withErrorCode, which cannot return another host.
  */
 export async function openVerificationLink(ctx: GateContext): Promise<never> {
   const query = isRecord(ctx.query) ? ctx.query : {};
-  const callbackPath = typeof query.callbackURL === "string" ? query.callbackURL : "/";
+  const callbackPath = isSitePath(query.callbackURL) ? query.callbackURL : "/";
   const token = query.token;
   const payload: unknown =
     typeof token === "string" && token.length <= TOKEN_MAX_CHARS
@@ -81,14 +80,14 @@ export async function openVerificationLink(ctx: GateContext): Promise<never> {
       : null;
   // A token that carries `updateTo` belongs to the email-change flow, which is switched off.
   if (!isRecord(payload) || typeof payload.email !== "string" || payload.updateTo !== undefined) {
-    throw ctx.redirect(withError(callbackPath, "INVALID_TOKEN"));
+    throw ctx.redirect(withErrorCode(callbackPath, "INVALID_TOKEN"));
   }
   const address = payload.email.toLowerCase();
   const [found] = await getDb()
     .select({ emailVerified: user.emailVerified })
     .from(user)
     .where(eq(user.email, address));
-  if (!found) throw ctx.redirect(withError(callbackPath, "USER_NOT_FOUND"));
+  if (!found) throw ctx.redirect(withErrorCode(callbackPath, "USER_NOT_FOUND"));
   if (!found.emailVerified) await leaveProof(ctx, address);
   throw ctx.redirect(callbackPath);
 }

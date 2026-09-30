@@ -11,9 +11,11 @@ import { getEnv, type Env } from "@/server/env";
 import { runInBackground } from "@/server/http/background";
 import { sendMail } from "@/server/mail/transport";
 
+import { recordAuthEvent } from "./audit";
 import { recordSignupConsent } from "./consent";
 import { purgeUserLeftovers } from "./deletion";
 import { authGate } from "./gate";
+import { isRecord } from "./gate-context";
 import { authLog } from "./log";
 import { authSchemaOptions } from "./options";
 import { refuseLoginForSuspended } from "./suspension";
@@ -106,6 +108,7 @@ export function createAuth(overrides: AuthOverrides = {}) {
       ...authSchemaOptions.emailAndPassword,
       minPasswordLength: 10,
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: ({ user }) => recordAuthEvent("password_reset_completed", { actorUserId: user.id }),
       // Better Auth hands the returned promise to backgroundTasks.handler, so the
       // response never waits for the send and its timing does not reveal an account.
       sendResetPassword: ({ user, url, token }) =>
@@ -175,6 +178,8 @@ export function createAuth(overrides: AuthOverrides = {}) {
         // The password requirement is enforced by the gate. This removes what the
         // foreign-key cascade cannot reach before the user row goes.
         beforeDelete: (account) => purgeUserLeftovers(account.id, account.email),
+        // Recorded without an actor: the account no longer exists.
+        afterDelete: () => recordAuthEvent("account_deleted"),
       },
     },
     hooks: { before: authGate },
@@ -188,8 +193,20 @@ export function createAuth(overrides: AuthOverrides = {}) {
       },
       user: {
         create: {
-          after: async (created) => {
-            await recordSignupConsent(created.id, created.marketingOptIn === true);
+          // The Privacy notice version is not a column: it is read from the body
+          // of the registration that created the row. recordSignupConsent checks
+          // it again and records privacy consent only at a version that was named.
+          after: async (created, context) => {
+            const body: unknown = context?.body;
+            await recordSignupConsent({
+              id: created.id,
+              acceptedTermsVersion: created.acceptedTermsVersion,
+              acceptedPrivacyVersion:
+                isRecord(body) && Object.hasOwn(body, "acceptedPrivacyVersion")
+                  ? body.acceptedPrivacyVersion
+                  : undefined,
+              marketingOptIn: created.marketingOptIn,
+            });
           },
         },
       },

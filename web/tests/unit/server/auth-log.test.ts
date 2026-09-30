@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { authLog } from "@/server/auth/log";
-import { isValidTimeZone } from "@/server/auth/timezone";
+import { isValidTimezone } from "@/domain/schedule";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -31,16 +31,16 @@ describe("authLog", () => {
   });
 });
 
-describe("isValidTimeZone", () => {
+describe("isValidTimezone, as the sign-up gate uses it", () => {
   it("accepts IANA zone names", () => {
     for (const zone of ["UTC", "Europe/Berlin", "America/Argentina/Buenos_Aires", "Asia/Kolkata"]) {
-      expect(isValidTimeZone(zone)).toBe(true);
+      expect(isValidTimezone(zone)).toBe(true);
     }
   });
 
   it("rejects offsets, unknown zones, and non-strings", () => {
     for (const zone of ["+05:00", "Mars/Olympus", "", " UTC", "Europe/Berlin; drop", 5, null, undefined]) {
-      expect(isValidTimeZone(zone)).toBe(false);
+      expect(isValidTimezone(zone)).toBe(false);
     }
   });
 });

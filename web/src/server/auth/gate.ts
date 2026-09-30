@@ -4,17 +4,19 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { z } from "zod";
 
 import { CONSENT_VERSIONS } from "@/domain/limits";
+import { isValidTimezone } from "@/domain/schedule";
 import { getEnv } from "@/server/env";
 import { constantTimeEqual } from "@/server/http/compare";
 import { mailDelivery } from "@/server/mail/transport";
 
 import { ADDRESS_RULES, consumeAddressLimit } from "./address-limit";
+import { recordAuthEvent } from "./audit";
 import { isRecord, type Body, type GateContext } from "./gate-context";
+import { isSitePath, SITE_PATH_MAX } from "./paths";
 import { discardPendingAccount } from "./pending";
 import { getRegistrationState } from "./registration";
 import { SIGNUP_CODE_HEADER } from "./signup-code";
 import { refuseSuspendedLogin } from "./suspension";
-import { isValidTimeZone } from "./timezone";
 import { completeVerification, openVerificationLink } from "./verification";
 
 const NAME_MAX = 100;
@@ -27,6 +29,7 @@ const SIGN_UP_KEYS = new Set([
   "password",
   "timezone",
   "acceptedTermsVersion",
+  "acceptedPrivacyVersion",
   "marketingOptIn",
   "callbackURL",
   "rememberMe",
@@ -34,10 +37,6 @@ const SIGN_UP_KEYS = new Set([
 const UPDATE_USER_KEYS = new Set(["name", "timezone"]);
 const DELETE_USER_KEYS = new Set(["password", "callbackURL"]);
 
-/** Longest path a mail link or a redirect may carry. It is stored in captured mail, so it is bounded. */
-const APP_PATH_MAX = 512;
-/** One leading slash, then printable ASCII without a space or a backslash. Never "//host" or "/\host". */
-const APP_PATH = /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]*$/;
 /** Body and query fields that name where the person is sent next, with the error code for each. */
 const REDIRECT_FIELDS = {
   callbackURL: "INVALID_CALLBACK_URL",
@@ -50,16 +49,19 @@ const REDIRECT_FIELDS = {
  * A redirect target must be a path on this site of bounded length. Better Auth
  * accepts any trusted-origin URL of any size and copies it into the mail it
  * sends, so without this one request could store a megabyte.
+ *
+ * "On this site" is judged after the value is resolved the way a browser
+ * resolves it (isSitePath), not by its first characters: "/.//host" starts with
+ * one slash and still leads to another host.
  */
 function assertAppPaths(source: unknown): void {
   if (!isRecord(source)) return;
   for (const [field, code] of Object.entries(REDIRECT_FIELDS)) {
     if (!Object.hasOwn(source, field)) continue;
-    const value = source[field];
-    if (typeof value !== "string" || value.length > APP_PATH_MAX || !APP_PATH.test(value)) {
+    if (!isSitePath(source[field])) {
       throw new APIError("UNPROCESSABLE_ENTITY", {
         code,
-        message: `Use a path on this site of at most ${APP_PATH_MAX} characters for ${field}.`,
+        message: `Use a path on this site of at most ${SITE_PATH_MAX} characters for ${field}.`,
       });
     }
   }
@@ -99,7 +101,7 @@ function assertName(name: unknown): void {
 }
 
 function assertTimeZone(timezone: unknown): void {
-  if (!isValidTimeZone(timezone)) {
+  if (!isValidTimezone(timezone)) {
     throw new APIError("UNPROCESSABLE_ENTITY", {
       code: "INVALID_TIMEZONE",
       message: "Choose a valid IANA timezone, for example Europe/Berlin.",
@@ -107,11 +109,108 @@ function assertTimeZone(timezone: unknown): void {
   }
 }
 
+const ACCEPT_TO_REGISTER = "Accept the Terms and the Privacy notice to create an account.";
+
+function termsNotAccepted(message: string): APIError {
+  return new APIError("UNPROCESSABLE_ENTITY", { code: "TERMS_NOT_ACCEPTED", message });
+}
+
+/**
+ * Consent gate. It passes for exactly one value: the current version of the
+ * Terms, as a string, compared in full. Each other state is refused with a
+ * message that names what is wrong, and no message echoes what was sent.
+ *
+ * A marketing choice never stands in for it. It is a separate field, recorded
+ * as a separate row (see recordSignupConsent). The Privacy notice has its own
+ * check, assertPrivacyAccepted.
+ */
+function assertTermsAccepted(body: Body): void {
+  const value = Object.hasOwn(body, "acceptedTermsVersion") ? body.acceptedTermsVersion : undefined;
+  if (value === undefined) {
+    const marketingOnly = body.marketingOptIn !== undefined && body.marketingOptIn !== false;
+    throw termsNotAccepted(
+      marketingOnly
+        ? `acceptedTermsVersion is missing. Agreeing to product news does not accept the Terms. ${ACCEPT_TO_REGISTER}`
+        : `acceptedTermsVersion is missing. ${ACCEPT_TO_REGISTER}`,
+    );
+  }
+  if (typeof value !== "string") {
+    throw termsNotAccepted("acceptedTermsVersion must be text. Send the version of the Terms that was accepted.");
+  }
+  if (value.length === 0) {
+    throw termsNotAccepted(`acceptedTermsVersion is empty. ${ACCEPT_TO_REGISTER}`);
+  }
+  if (value !== CONSENT_VERSIONS.terms) {
+    throw termsNotAccepted(
+      `acceptedTermsVersion is not the current version of the Terms (${CONSENT_VERSIONS.terms}). ` +
+        "Read and accept the current Terms to create an account.",
+    );
+  }
+}
+
+const RELOAD_FOR_PRIVACY =
+  "Reload the page, read the current Privacy notice, and agree again to create an account.";
+
+function privacyNotAccepted(message: string): APIError {
+  return new APIError("UNPROCESSABLE_ENTITY", { code: "PRIVACY_NOT_ACCEPTED", message });
+}
+
+/**
+ * Consent gate for the Privacy notice. Privacy consent is recorded at the
+ * version the request named, so the request has to name the current one:
+ *
+ * - `acceptedPrivacyVersion`, when it is sent, must be the current version of
+ *   the Privacy notice, as a string, compared in full;
+ * - when it is not sent, the request named one version for both documents (the
+ *   sign-up box covers both). That version stands for the Privacy notice only
+ *   if it is exactly its current version too.
+ *
+ * So a page that was rendered before the Privacy notice changed cannot accept
+ * the new text unread, whichever of the two it sends. No message repeats what
+ * was sent, and a marketing choice never stands in for either document.
+ */
+function assertPrivacyAccepted(body: Body): void {
+  if (!Object.hasOwn(body, "acceptedPrivacyVersion") || body.acceptedPrivacyVersion === undefined) {
+    if (body.acceptedTermsVersion !== CONSENT_VERSIONS.privacy) {
+      throw privacyNotAccepted(
+        "acceptedPrivacyVersion is missing, and the version the request names is not the current version of the " +
+          `Privacy notice. ${RELOAD_FOR_PRIVACY}`,
+      );
+    }
+    return;
+  }
+  const value = body.acceptedPrivacyVersion;
+  if (typeof value !== "string") {
+    throw privacyNotAccepted(
+      "acceptedPrivacyVersion must be text. Send the version of the Privacy notice that was accepted.",
+    );
+  }
+  if (value.length === 0) {
+    throw privacyNotAccepted(`acceptedPrivacyVersion is empty. ${ACCEPT_TO_REGISTER}`);
+  }
+  if (value !== CONSENT_VERSIONS.privacy) {
+    throw privacyNotAccepted(
+      `acceptedPrivacyVersion is not the current version of the Privacy notice. ${RELOAD_FOR_PRIVACY}`,
+    );
+  }
+}
+
+/** What the gate hands back to Better Auth: the one body field it rewrites. */
+interface SignUpRewrite {
+  context: { body: { marketingOptIn: boolean } };
+}
+
 /**
  * Registration gate. Order matters: a closed or paused deployment says so
- * before anything else is checked, then the access code, then the body.
+ * before anything else is checked (the operator rule first, inside
+ * getRegistrationState), then the access code, then the body.
+ *
+ * Marketing consent is granted by the boolean `true` and by nothing else. Any
+ * other value ("true", "on", 1, a missing field) is replaced with `false`
+ * before Better Auth reads the body, so no coercion further down can turn it
+ * into a grant.
  */
-async function gateSignUp(ctx: GateContext): Promise<void> {
+async function gateSignUp(ctx: GateContext): Promise<SignUpRewrite> {
   const rawBody: unknown = ctx.body;
   const headers = ctx.headers;
   const env = getEnv();
@@ -133,24 +232,32 @@ async function gateSignUp(ctx: GateContext): Promise<void> {
   }
   const body = asBody(rawBody);
   assertOnlyKeys(body, SIGN_UP_KEYS);
-  if (body.acceptedTermsVersion !== CONSENT_VERSIONS.terms) {
-    throw new APIError("UNPROCESSABLE_ENTITY", {
-      code: "TERMS_NOT_ACCEPTED",
-      message: "Accept the current terms to create an account.",
-    });
-  }
+  assertTermsAccepted(body);
+  assertPrivacyAccepted(body);
   assertTimeZone(body.timezone);
   assertName(body.name);
   if (typeof body.email !== "string" || body.email.length > EMAIL_MAX) {
     throw new APIError("UNPROCESSABLE_ENTITY", { code: "INVALID_EMAIL", message: "Enter a valid email address." });
   }
-  if (body.marketingOptIn !== undefined && typeof body.marketingOptIn !== "boolean") {
-    throw new APIError("UNPROCESSABLE_ENTITY", {
-      code: "INVALID_MARKETING_OPT_IN",
-      message: "The marketing choice must be true or false.",
-    });
-  }
   if (wouldBeAccepted(ctx, body)) await discardPendingAccount(body.email);
+  return { context: { body: { marketingOptIn: body.marketingOptIn === true } } };
+}
+
+/**
+ * Run the registration gate and leave an audit row for every refusal it
+ * raises: the action and the refusal code, nothing about the person. The
+ * refusal is rethrown whether or not the row could be written.
+ */
+async function gateSignUpAudited(ctx: GateContext): Promise<SignUpRewrite> {
+  try {
+    return await gateSignUp(ctx);
+  } catch (error) {
+    if (error instanceof APIError) {
+      const code = (error.body as { code?: unknown } | undefined)?.code;
+      await recordAuthEvent("registration_refused", { code: typeof code === "string" ? code : "UNKNOWN" });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -242,8 +349,7 @@ export const authGate = createAuthMiddleware(async (ctx) => {
   await refuseSuspendedLogin(ctx);
   switch (ctx.path) {
     case "/sign-up/email":
-      await gateSignUp(ctx);
-      return;
+      return gateSignUpAudited(ctx);
     case "/sign-in/email":
       await completeVerification(ctx);
       return;
