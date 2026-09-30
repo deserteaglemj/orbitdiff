@@ -49,6 +49,35 @@ def changed_archive(archive: Path, change: str) -> Path:
         )
     elif change == "unsafe_path":
         entries["../outside.txt"] = b"outside"
+    elif change == "asset_wrong_root":
+        entries["orbitdiff/assets/orbitdiff-mark.svg"] = b"<notsvg/>"
+    elif change == "asset_wrong_namespace":
+        entries["orbitdiff/assets/orbitdiff-mark.svg"] = b'<svg xmlns="urn:unrelated"/>'
+    elif change.startswith("frontmatter_"):
+        additions = {
+            "frontmatter_duplicate_name": b"name: wrong-skill\n",
+            "frontmatter_duplicate_description": b"description: Different description\n",
+            "frontmatter_malformed_key": b"malformed key without colon\n",
+            "frontmatter_unknown_key": b"unknown: value\n",
+            "frontmatter_spaced_duplicate": b"name : wrong-skill\n",
+        }
+        skill = entries["orbitdiff/SKILL.md"]
+        if change == "frontmatter_nonstring_description":
+            lines = skill.splitlines(keepends=True)
+            skill = b"".join(b"description: [not-a-string]\n" if line.startswith(b"description:") else line for line in lines)
+        else:
+            skill = skill.replace(b"name: orbitdiff\n", b"name: orbitdiff\n" + additions[change], 1)
+        entries["orbitdiff/SKILL.md"] = skill
+    elif change.startswith("interface_"):
+        additions = {
+            "interface_duplicate_field": b'  display_name: "Different name"\n',
+            "interface_duplicate_root": b'interface:\n  display_name: "Different name"\n',
+            "interface_malformed_field": b'  malformed field without colon\n',
+            "interface_unknown_field": b'  unknown: "value"\n',
+            "interface_unknown_root": b'other:\n  extra: "value"\n',
+            "interface_bad_indentation": b'   extra: "value"\n',
+        }
+        entries["orbitdiff/agents/openai.yaml"] += additions[change]
     result = archive.with_name("modified-skill.zip")
     with zipfile.ZipFile(result, "w") as target:
         for name, content in entries.items():
@@ -93,6 +122,31 @@ def test_wrong_skill_version_is_rejected(tmp_path: Path, skill_archive: Path) ->
     module = checker()
     with pytest.raises(ValueError, match="version"):
         module.validate_skill_archive(skill_archive, tmp_path / "skill", "9.9.9")
+
+
+@pytest.mark.parametrize("change", [
+    "frontmatter_duplicate_name", "frontmatter_duplicate_description", "frontmatter_malformed_key",
+    "frontmatter_unknown_key", "frontmatter_spaced_duplicate", "frontmatter_nonstring_description",
+    "interface_duplicate_field", "interface_duplicate_root", "interface_malformed_field",
+    "interface_unknown_field", "interface_unknown_root", "interface_bad_indentation",
+])
+def test_duplicate_or_malformed_skill_and_host_metadata_is_rejected_before_extraction(
+    tmp_path: Path, skill_archive: Path, change: str,
+) -> None:
+    module = checker()
+    destination = tmp_path / "installed skill"
+    with pytest.raises(ValueError, match="metadata|frontmatter|interface"):
+        module.validate_skill_archive(changed_archive(skill_archive, change), destination, "0.2.2")
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("change", ["asset_wrong_root", "asset_wrong_namespace"])
+def test_non_svg_asset_root_is_rejected_before_extraction(tmp_path: Path, skill_archive: Path, change: str) -> None:
+    module = checker()
+    destination = tmp_path / "installed skill"
+    with pytest.raises(ValueError, match="SVG"):
+        module.validate_skill_archive(changed_archive(skill_archive, change), destination, "0.2.2")
+    assert not destination.exists()
 
 
 def test_wrong_candidate_version_returns_error_receipt_before_installation(

@@ -54,6 +54,56 @@ def _linked_file(origin: str, reference: str, files: dict[str, bytes]) -> str | 
     return resolved
 
 
+def _metadata_string(raw: str, *, quoted: bool) -> str:
+    if raw.startswith('"'):
+        value = json.loads(raw)
+    elif (quoted or not raw or raw[0] in "-?:,[]{}#&*!|>'%@`"
+          or ": " in raw or " #" in raw or raw.strip() != raw
+          or raw.casefold() in {"true", "false", "null", "yes", "no", "on", "off", "~"}
+          or re.fullmatch(r"[\d.+-]+", raw)):
+        raise ValueError("skill metadata requires an unambiguous string value")
+    else:
+        value = raw
+    if not isinstance(value, str) or not value or any(ord(character) < 32 for character in value):
+        raise ValueError("skill metadata requires a nonempty single-line string")
+    return value
+
+
+def _metadata_map(text: str, *, top_keys: set[str], map_key: str,
+                  child_keys: set[str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
+    """Accept the packaged flat YAML string maps, never silently skip a line."""
+    lines = text.splitlines()
+    if len(text) > 16 * 1024 or len(lines) > 128 or "\t" in text:
+        raise ValueError("skill metadata document is oversized or malformed")
+    top: dict[str, str] = {}
+    children: dict[str, str] = {}
+    in_map = False
+    for line in lines:
+        if not line.strip():
+            continue
+        if line.startswith(" "):
+            match = re.fullmatch(r"  ([a-z][a-z0-9_-]*): (.+)", line)
+            if (not in_map or match is None or match.group(1) in children
+                    or (child_keys is not None and match.group(1) not in child_keys)):
+                raise ValueError("skill metadata has a duplicate, unknown, or malformed nested key")
+            children[match.group(1)] = _metadata_string(match.group(2), quoted=True)
+            continue
+        match = re.fullmatch(r"([a-z][a-z0-9_-]*):(?: (.+))?", line)
+        if match is None or match.group(1) in top or match.group(1) not in top_keys | {map_key}:
+            raise ValueError("skill frontmatter or interface has a duplicate, unknown, or malformed key")
+        key, value = match.group(1), match.group(2)
+        in_map = key == map_key
+        if in_map:
+            if value is not None:
+                raise ValueError("skill metadata mapping requires an indented string map")
+            top[key] = ""
+        else:
+            top[key] = _metadata_string(value or "", quoted=False)
+    if set(top) != top_keys | {map_key} or not children or (child_keys is not None and set(children) != child_keys):
+        raise ValueError("skill metadata document is missing required fields")
+    return top, children
+
+
 def validate_skill_archive(archive: Path, destination: Path, version: str) -> dict[str, Any]:
     """Validate the complete archive before creating its isolated installation."""
     files = _zip_files(archive, limit=8 * 1024 * 1024)
@@ -61,29 +111,18 @@ def validate_skill_archive(archive: Path, destination: Path, version: str) -> di
     if set(files) != expected:
         raise ValueError("skill archive has missing or unexpected packaged files")
     text = files["orbitdiff/SKILL.md"].decode("utf-8")
-    if not text.startswith("---\n") or len(text.split("---", 2)) != 3:
+    lines = text.splitlines()
+    if not lines or lines[0] != "---" or "---" not in lines[1:129]:
         raise ValueError("skill frontmatter is missing")
-    frontmatter = text.split("---", 2)[1]
-    if not re.search(r"^name: orbitdiff$", frontmatter, re.MULTILINE):
+    frontmatter, metadata = _metadata_map("\n".join(lines[1:lines.index("---", 1)]),
+        top_keys={"name", "description", "license", "compatibility"}, map_key="metadata")
+    if frontmatter["name"] != "orbitdiff":
         raise ValueError("skill name is invalid")
-    description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
-    if description is None or not 1 <= len(description.group(1)) <= 1024:
+    if not 1 <= len(frontmatter["description"]) <= 1024:
         raise ValueError("skill description is invalid")
-    metadata: dict[str, str] = {}
-    for line in frontmatter.split("metadata:\n", 1)[-1].splitlines():
-        if not line.strip():
-            continue
-        match = re.fullmatch(r"  ([a-z_-]+): (.+)", line)
-        if match is None or match.group(1) in metadata:
-            raise ValueError("skill metadata must be a unique string map")
-        value = json.loads(match.group(2))
-        if not isinstance(value, str):
-            raise ValueError("skill metadata must contain strings")
-        metadata[match.group(1)] = value
     if metadata.get("version") != version:
         raise ValueError("skill and requested runtime version mismatch")
-    compatibility = re.search(r"^compatibility: (.+)$", frontmatter, re.MULTILINE)
-    declaration = compatibility.group(1) if compatibility else ""
+    declaration = frontmatter["compatibility"]
     minor = re.search(r"\b(\d+\.\d+)\.x\b", declaration)
     minimum = re.search(r"\bminimum (\d+\.\d+\.\d+)\b", declaration)
     if (not re.fullmatch(r"\d+\.\d+\.\d+", version) or minor is None or minimum is None
@@ -99,13 +138,13 @@ def validate_skill_archive(archive: Path, destination: Path, version: str) -> di
                 if linked:
                     links.append(linked)
     host = files["orbitdiff/agents/openai.yaml"].decode("utf-8")
-    fields = dict(re.findall(r'^  ([a-z_]+): "([^"\n]+)"$', host, re.MULTILINE))
-    if (not host.startswith("interface:\n") or not fields.get("display_name")
-            or not fields.get("short_description") or "$orbitdiff" not in fields.get("default_prompt", "")):
+    _, fields = _metadata_map(host, top_keys=set(), map_key="interface",
+        child_keys={"display_name", "short_description", "icon_small", "icon_large", "default_prompt"})
+    if "$orbitdiff" not in fields["default_prompt"]:
         raise ValueError("skill host metadata is invalid")
     for key in ("icon_small", "icon_large"):
         target = _linked_file("orbitdiff/SKILL.md", fields.get(key, "missing"), files)
-        if target is None or not ET.fromstring(files[target]).tag.endswith("svg"):
+        if target is None or ET.fromstring(files[target]).tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
             raise ValueError("skill asset is not a valid local SVG")
     _check_path(destination)
     if destination.exists():
