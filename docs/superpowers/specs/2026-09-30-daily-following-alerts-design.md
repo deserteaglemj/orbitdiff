@@ -22,7 +22,11 @@ Setup is inactive. Binding a host ID records registration; enablement requires a
 
 Every local calendar date has one due window. A repeated local time uses the first occurrence; a nonexistent time moves forward to the first valid minute. Store actual instants in UTC. A wake processes only the most recent due window since activation, records a compact range/count of missed windows, and never catches up in a burst. Clock rollback does not reopen a claimed window. Resume skips paused windows. A schedule edit retains its consumed window boundary to prevent a second collection that day.
 
+This defines runtime eligibility, not a host wake guarantee. If the host skips a DST occurrence or is unavailable, record it as missed on the next wake and apply bounded catch-up. Do not add frequent model wakeups to simulate a stronger scheduler guarantee.
+
 Claim the window transactionally before collection. Never reclaim a crashed window for another collection. Mark abandoned claims interrupted after a bounded observation interval. Retain the existing cross-entry-point 30-minute cooldown. Extract one live runner shared by manual and scheduled scans. Fence result commits against the persisted attempt identity so a suspended older collector cannot overwrite a newer attempt.
+
+A cooldown rejection consumes the scheduled window as skipped without a provider request. It does not block the job or imply a new failed observation. The next ordinary daily window remains eligible. Previously confirmed notifications can still be reconciled and delivered.
 
 A subscription has its own UUID and activation event watermark. Reconcile stored `following_started` IDs above that watermark into durable delivery units transactionally, with a unique subscription/event mapping. Reconciliation runs even if the previous process crashed after confirming events. It never uses stdout and never replays preactivation events implicitly. Baselines and pending changes are silent. Matching observations confirm each relationship edge, not an identical whole roster.
 

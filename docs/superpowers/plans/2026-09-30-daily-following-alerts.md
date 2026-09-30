@@ -30,6 +30,7 @@ Interfaces: `daily_due(now, time, timezone)` and `next_due(...)` return UTC date
 
 - [ ] Write focused behavior tests before each change; run with the selected existing Python and `-m pytest` to observe missing behavior.
 - [ ] Implement migration, date policy, configure/bind/enable/pause/update/remove/status, durable claims, and fenced shared collection. Test real temporary SQLite databases and simultaneous callers.
+- [ ] Cover a recent manual attempt: the scheduled window is skipped for cooldown, the provider is untouched, and the healthy job stays enabled. Host DST wake omissions are gaps, not fabricated runs.
 - [ ] Run focused tests and existing store/CLI regressions. Expected: all pass, preserved source fingerprints and silent baseline.
 - [ ] Commit the logical state/collection slice.
 
