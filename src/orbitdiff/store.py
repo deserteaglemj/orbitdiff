@@ -17,6 +17,10 @@ from .models import Account, Collection, Event
 from .paths import ensure_private_directory, validate_database_path
 from .providers.base import validate_collection
 
+
+class StaleAttemptError(RuntimeError):
+    """A newer live admission owns the target's results."""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
     version INTEGER PRIMARY KEY
@@ -211,7 +215,8 @@ class GraphStore:
             "pending_first_seen_at": row["pending_first_seen_at"],
         } for row in rows]
 
-    def apply_collection(self, collection: Collection, *, baseline_run: bool = False) -> list[Event]:
+    def apply_collection(self, collection: Collection, *, baseline_run: bool = False,
+                         attempted_at: datetime | None = None) -> list[Event]:
         if not collection.complete:
             raise ValueError("incomplete collections cannot change graph state")
         validate_collection(collection)
@@ -224,6 +229,7 @@ class GraphStore:
         with self._connection() as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                self._check_attempt(connection, collection.target, attempted_at)
                 target_row = connection.execute(
                     "SELECT target FROM targets WHERE target = ?", (collection.target,)
                 ).fetchone()
@@ -362,13 +368,25 @@ class GraphStore:
             run_id=run_id,
         )
 
-    def record_failed_run(self, target: str, error: str, *, baseline_run: bool = False) -> None:
+    @staticmethod
+    def _check_attempt(connection: sqlite3.Connection, target: str,
+                       attempted_at: datetime | None) -> None:
+        if attempted_at is None:
+            return
+        row = connection.execute("SELECT attempted_at FROM live_attempts WHERE target=?", (target,)).fetchone()
+        if row is None or row[0] != attempted_at.astimezone(UTC).isoformat():
+            raise StaleAttemptError("a newer live attempt owns this target")
+
+    def record_failed_run(self, target: str, error: str, *, baseline_run: bool = False,
+                          attempted_at: datetime | None = None, now: datetime | None = None) -> None:
         self.initialize()
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._check_attempt(connection, target, attempted_at)
             connection.execute(
                 """INSERT INTO runs(target, state, run_kind, collected_at, error)
                 VALUES (?, 'failed', ?, ?, ?)""",
-                (target, "baseline" if baseline_run else "scan", datetime.now(UTC).isoformat(), error),
+                (target, "baseline" if baseline_run else "scan", (now or datetime.now(UTC)).isoformat(), error),
             )
             connection.commit()
 
