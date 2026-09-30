@@ -15,7 +15,7 @@ This patch refines the existing portable Agent Skill and local Orbit OS app. It 
 
 Eleven synthetic scenarios were run against the updated skill and the preserved 0.2.0 instructions, using the same candidate runtime. Independent grading found 44 of 44 assertions passing for the updated skill and 43 of 44 for the baseline. The baseline's one failure was contradictory reporting after a correct version-only stop, not an unsafe command. All 40 source fixture files and 80 permission/modification metadata entries matched their pre-run assessment.
 
-The scenarios cover partial and dated exports, duplicate and older imports, pending removals, failed collection, private-profile refusal, bundled command paths, incompatible runtimes, embedded export instructions, and corrupt history. Both variants handled the substantive safety cases. These results do not establish statistical superiority or universal agent compatibility: each variant used one grouped agent session, both agents were reused because of a thread limit, app-path fixtures were synthetic, and neither token usage nor complete executor timing was available. Native packaging was verified separately above.
+The scenarios cover partial and dated exports, duplicate and older imports, pending removals, failed collection, private-profile refusal, bundled command paths, incompatible runtimes, embedded export instructions, and corrupt history. Both variants handled the substantive safety cases. These results do not establish statistical superiority or universal agent compatibility: each variant used one grouped agent session, both agents were reused because of a thread limit, app-path fixtures were synthetic, and neither token usage nor complete executor timing was available. Native packaging was verified separately.
 
 ## Apple Silicon developer preview
 
@@ -30,7 +30,7 @@ This app is ad-hoc signed and not notarized. Gatekeeper rejects a quarantined co
 | Artifact | SHA-256 |
 | --- | --- |
 | `orbitdiff-0.2.1-py3-none-any.whl` | `09920471b2a008c89ba0b25ad57837240c60836a0f17863d151a3b3dc8852433` |
-| `orbitdiff-0.2.1.tar.gz` | `86afa86754699292d7c509d32dfe4827865f8dfcfde80054407525c6b4ef3905` |
+| `orbitdiff-0.2.1.tar.gz` | `01f553a4dd491ec911db9af4c1e6f236c92b63296ba9987c9327ff944546d516` |
 | `orbitdiff-skill-0.2.1.zip` | `baa3903c5a9a436efeee585d19b2a99b43580f68b1eab6ba044bef45147033a4` |
 | `Orbit-OS-0.2.1-macOS-arm64.zip` | `41d0b242018dd88e2b5ac3d67d1ade674336a96a51e825b0ff75625a73bb8ecf` |
 | `Orbit-OS-0.2.1-macOS-arm64.dmg` | `7acca694759cfdf4330ceaf94bef42d2fa80f7b23d1f3f477bd740643a432353` |

@@ -45,7 +45,8 @@ def test_generator_creates_separate_complete_scenarios_and_no_answer_keys_in_pro
     second_database = Path(second_context["source_workspace"]) / "orbitdiff.sqlite3"
     assert first_database != second_database
     assert first_database.read_bytes() == second_database.read_bytes()
-    with sqlite3.connect(f"file:{first_database}?mode=ro", uri=True) as connection:
+    # This checkpointed fixture is frozen; do not create SQLite WAL sidecars.
+    with sqlite3.connect(first_database.as_uri() + "?mode=ro&immutable=1", uri=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM edges WHERE pending_present = 0").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM runs WHERE state = 'failed'").fetchone()[0] == 1
