@@ -253,7 +253,10 @@ def check_install(wheel: Path, skill_archive: Path, source_commit: str, *, outpu
                  str(Path(sys.base_prefix)): "<PYTHON_BASE>", str(Path(sys.executable)): "<CHECK_PYTHON>"}
     try:
         if output_dir is None:
-            output = Path(tempfile.mkdtemp(prefix="orbit-skill-install-", dir=Path(tempfile.gettempdir()).resolve()))
+            temporary_parent = Path(tempfile.gettempdir()).resolve()
+            if temporary_parent.is_relative_to(ROOT):
+                raise ValueError("choose an installation output directory outside the checkout")
+            output = Path(tempfile.mkdtemp(prefix="orbit-skill-install-", dir=temporary_parent))
         else:
             requested = output_dir.absolute()
             _check_path(requested)

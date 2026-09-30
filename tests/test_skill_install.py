@@ -181,6 +181,31 @@ def test_existing_output_is_preserved_and_output_under_checkout_is_rejected(
     assert result["outcome"] == "error" and not inside.exists()
 
 
+@pytest.mark.parametrize("location", ["checkout", "child", "symlink"])
+def test_default_temp_directory_inside_checkout_is_rejected_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str,
+) -> None:
+    module = checker()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    temp = checkout if location == "checkout" else checkout / "temporary"
+    temp.mkdir(exist_ok=True)
+    if location == "symlink":
+        alias = tmp_path / "temp-alias"
+        alias.symlink_to(temp, target_is_directory=True)
+        temp = alias
+    monkeypatch.setattr(module, "ROOT", checkout)
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(temp))
+    before = set(checkout.rglob("*"))
+
+    result = module.check_install(tmp_path / "unused.whl", tmp_path / "unused.zip", "1" * 40)
+
+    assert result["outcome"] == "error" and result["phase"] == "output"
+    assert "outside the checkout" in result["error"]
+    assert result["commands"] == [] and result["receipt_path"] is None
+    assert set(checkout.rglob("*")) == before
+
+
 def test_installed_product_file_mismatch_is_rejected(
     tmp_path: Path, frozen_installation: tuple[Path, Path, Path],
 ) -> None:
