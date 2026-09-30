@@ -4,7 +4,7 @@ Orbit OS has two separate distributions: the portable `orbitdiff` Agent Skill an
 
 ## Platform and release status
 
-The latest patch verification and exact artifact checksums are recorded in [0.2.1 verification](verification-0.2.1.md). The historical 0.2.0 results below remain unchanged.
+Version-specific verification records hold exact artifact checksums. [0.2.1 verification](verification-0.2.1.md) and the 0.2.0 results below are historical evidence. Use [release readiness](release-readiness.md) for the current acceptance criteria; a new build needs fresh evidence.
 
 The current recipe targets Apple Silicon macOS with macOS 13 or newer declared in the bundle. Runtime verification is performed on the actual build machine; the declared minimum is not a claim that every supported macOS release has been tested. Intel macOS, Windows, and Linux do not have verified artifacts from this recipe. They require their own native builds and installation checks.
 
@@ -29,7 +29,7 @@ The output directory must be new. For a later candidate, choose separate output 
 .orbit-local/desktop-managed-venv/bin/python scripts/build_desktop.py --output dist/desktop-next --work .orbit-local/desktop-next-build --dmg
 ```
 
-The result includes `Orbit OS.app`, a versioned ZIP, an optional DMG, and `SHA256SUMS.txt`. The PyInstaller intermediate directory is not an additional user distribution. Copy the app to Applications after extracting the ZIP or opening the disk image.
+The result includes `Orbit OS.app`, a versioned ZIP, an optional DMG, and `SHA256SUMS.txt` in the selected output directory. Use that candidate's checksum file, never an older top-level `dist/SHA256SUMS.txt`. Assemble the final release checksum list from the exact audited Python, skill, and native artifacts. The PyInstaller intermediate directory is not an additional user distribution. Copy the app to Applications after extracting the ZIP or opening the disk image.
 
 The app starts an ephemeral loopback server and opens a native WebKit window. Closing that window stops its owned server. It installs no daemon, login item, or schedule. Personal imports stay in the chosen private workspace. Explicit compatibility mode keeps external source data read-only.
 

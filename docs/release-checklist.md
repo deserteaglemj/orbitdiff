@@ -2,6 +2,7 @@
 
 ## Candidate
 
+- [ ] Read `docs/release-readiness.md`; preserve the agreed developer-preview and live-verification gates.
 - [ ] Confirm publication authorization from the existing request or obtain it for a new scope.
 - [ ] Confirm `git status --short` is empty and record the local HEAD.
 - [ ] Review `CHANGELOG.md` for current-release impact statements.
@@ -17,7 +18,9 @@
 - [ ] `python scripts/package_audit.py dist/*.whl dist/*.tar.gz dist/orbitdiff-skill-*.zip`
 - [ ] Install the wheel in a clean virtual environment.
 - [ ] Run both CLI version checks, doctor in an isolated workspace, and both offline demos from the clean environment.
-- [ ] Generate synthetic skill scenarios with `scripts/prepare_skill_evals.py`, run the skill and comparison, and retain the evaluation evidence outside public source.
+- [ ] Generate synthetic skill scenarios with `scripts/prepare_skill_evals.py --runtime-python PYTHON --runtime-wheel WHEEL --synthetic-bundle --output-dir NEW_DIRECTORY`, using a clean installed candidate wheel. Evaluate the extracted audited skill ZIP, not checkout instructions.
+- [ ] Record actual runtime invocations and model-visible embedded-text exposure. Check source content, permissions, modification times, and missing-workspace preservation independently after inspection.
+- [ ] Run `scripts/prepare_skill_evals.py --verify-output DIRECTORY` after the cohort. Preserve provenance, complete responses, grades, and limitations in ignored local evidence. Use a comparison cohort only for an explicit comparative claim.
 - [ ] `python scripts/public_safety_scan.py .`
 - [ ] `gh skill publish --dry-run .`
 - [ ] Verify every install command, URL, version, and expected demo output in `docs/prompt.md` matches the current release. The prompt is the first-run experience for most users.
@@ -38,6 +41,12 @@
 - [ ] Verify extracted launch without external Python, local import/demo, native CSV save, and shutdown.
 - [ ] Verify archive hashes, DMG contents, architecture, and platform signature.
 - [ ] Assess a quarantined copy without bypassing protections. State blocked installation and signing limits plainly.
+
+## Live verification
+
+- [ ] Use only a user-authorized public target and human-created saved session with the exact candidate. Record one complete bounded collection and the corresponding stored-read result privately.
+- [ ] If the required references are absent or the provider fails, leave the live gate Unproven or Fail and both deliverables not ready under `docs/release-readiness.md`.
+- [ ] If a later comparison is exercised, preserve the baseline, respect cooldown after every attempt, and record pending versus confirmed events without retries or manufactured relationship changes.
 
 ## External publication
 

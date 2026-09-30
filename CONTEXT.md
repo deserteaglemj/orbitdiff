@@ -18,7 +18,7 @@ Orbit OS and the OrbitDiff Agent Skill operate on personal export observations a
 
 **Personal coverage**: Completeness declared by the user for a relationship direction. Effective complete coverage additionally requires the expected contiguous shards and known capture time; the declaration is not independently verified.
 
-**Current snapshot**: The selected latest dated personal observation. An older or undated import cannot displace a newer dated snapshot.
+**Current snapshot**: The personal observation selected for reporting. A newer dated snapshot takes priority over older or undated imports; an undated snapshot can be current when no dated snapshot exists.
 
 **Mutual**: Observed presence in both personal relationship directions. Positive presence does not require complete coverage.
 
