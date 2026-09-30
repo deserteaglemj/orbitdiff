@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
@@ -68,3 +69,39 @@ def test_new_private_directory_has_private_mode(tmp_path: Path) -> None:
     assert paths.ensure_private_directory(root) == root
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert stat.S_IMODE(root.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize('replacement', ['missing', 'hardlink', 'symlink'])
+def test_unlinked_sqlite_sidecar_is_rechecked_without_accepting_replacement_links(tmp_path, monkeypatch, replacement):
+    database = tmp_path / 'orbitdiff.sqlite3'
+    database.touch()
+    sidecar = tmp_path / 'orbitdiff.sqlite3-wal'
+    sidecar.write_text('synthetic WAL')
+    outside = tmp_path / 'preserved'
+    outside.write_text('unchanged')
+    original = Path.lstat
+    calls = 0
+
+    def raced(path, *args, **kwargs):
+        nonlocal calls
+        result = original(path, *args, **kwargs)
+        if path == sidecar:
+            calls += 1
+            if calls == 2:
+                sidecar.unlink()
+                if replacement == 'hardlink':
+                    os.link(outside, sidecar)
+                elif replacement == 'symlink':
+                    sidecar.symlink_to(outside)
+                fields = list(result)
+                fields[3] = 0
+                return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(Path, 'lstat', raced)
+    if replacement == 'missing':
+        assert paths.validate_database_path(database) == database
+    else:
+        with pytest.raises(OSError, match='link'):
+            paths.validate_database_path(database)
+    assert outside.read_text() == 'unchanged'
