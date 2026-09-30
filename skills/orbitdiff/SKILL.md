@@ -37,7 +37,7 @@ This document is authoritative for runtime compatibility and these boundaries. T
 | Diagnose or recover from failure | [Commands and recovery](references/commands.md); [interpretation](references/safety.md) for uncertain evidence | Observed failure, retained evidence, unknown cause, and next permitted action are separated. Repair is complete only after its authorized verification succeeds. |
 | Schedule scans explicitly | [Cadence](references/scheduling.md) | A verified manual live workflow precedes an authorized host schedule whose job details are returned. Missing manual proof, scope, cadence, or scheduler support is a blocker. |
 
-For a reusable, self-contained setup prompt, read [onboarding](references/onboarding.md). Personal exports are snapshot observations; public-list events require two matching complete observations. App launch, refresh, and report do not collect data. Live tracking is ready only after the selected target's complete live collection succeeds; local setup or a demo alone cannot establish that.
+For a reusable setup prompt and example requests, read [onboarding](references/onboarding.md). Personal exports are snapshot observations; public-list events require two matching complete observations. App launch, refresh, and report do not collect data. Live tracking is ready only after the selected target's complete live collection succeeds; local setup or a demo alone cannot establish that.
 
 ## Verify the executable and workspace
 
