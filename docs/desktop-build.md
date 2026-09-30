@@ -4,7 +4,7 @@ Orbit OS has two separate distributions: the portable `orbitdiff` Agent Skill an
 
 ## Platform and release status
 
-Version-specific verification records hold exact artifact checksums. [0.2.1 verification](verification-0.2.1.md) and the 0.2.0 results below are historical evidence. Use [release readiness](release-readiness.md) for the current acceptance criteria; a new build needs fresh evidence.
+Version-specific verification records hold exact artifact checksums. [0.2.2 preview verification](verification-0.2.2.md) records the current candidate. [0.2.1 verification](verification-0.2.1.md) and the 0.2.0 results below are historical evidence. Use [release readiness](release-readiness.md) for the current acceptance criteria; a new build needs fresh evidence.
 
 The current recipe targets Apple Silicon macOS with macOS 13 or newer declared in the bundle. Runtime verification is performed on the actual build machine; the declared minimum is not a claim that every supported macOS release has been tested. Intel macOS, Windows, and Linux do not have verified artifacts from this recipe. They require their own native builds and installation checks.
 
