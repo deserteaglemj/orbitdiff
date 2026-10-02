@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OrbitDiff | Synthetic 28-second walkthrough</title>
+<style>
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background:#0c1220; color:#eef3ff; }
+body { max-width:960px; margin:auto; padding:32px 24px; line-height:1.6; }
+h1 { font-size:clamp(2rem,5vw,3.4rem); line-height:1.15; margin:.3em 0; }
+h2 { line-height:1.25; } a { color:#92c8ff; }
+.eyebrow { color:#a6b6d0; font-size:.85rem; text-transform:uppercase; letter-spacing:.06em; }
+.mark { width:56px; height:56px; vertical-align:middle; margin-right:12px; }
+.control { display:inline-block; padding:10px 16px; border:1px solid #7387ac; border-radius:8px; cursor:pointer; }
+input { width:20px; height:20px; vertical-align:middle; accent-color:#60a5fa; }
+input:focus-visible + label { outline:3px solid #fbbf24; outline-offset:4px; }
+.stage { position:relative; min-height:350px; margin:24px 0; border:1px solid #33425c; border-radius:18px; overflow:hidden; background:#111b2f; }
+.frame { position:absolute; inset:0; padding:28px; opacity:0; visibility:hidden; }
+.frame:first-child { opacity:1; visibility:visible; }
+.badge { display:inline-block; border:1px solid #607392; padding:4px 12px; border-radius:100px; font-size:.9rem; }
+.pending { color:#fbd777; } .confirmed { color:#69e8b6; } .gap { color:#ffc8a0; }
+.handle { font-size:clamp(1.8rem,5vw,2.8rem); font-weight:700; margin:12px 0; }
+.dates { display:flex; flex-wrap:wrap; gap:24px; } .dates strong { display:block; font-weight:500; color:#a6b6d0; font-size:.9rem; }
+.foot { color:#b7c4db; font-size:.92rem; }
+#play:checked ~ .stage .frame { animation-duration:28s; animation-timing-function:step-end; animation-fill-mode:forwards; }
+#play:checked ~ .stage .f1 { animation-name:one; }
+#play:checked ~ .stage .f2 { animation-name:two; }
+#play:checked ~ .stage .f3 { animation-name:three; }
+#play:checked ~ .stage .f4 { animation-name:four; }
+@keyframes one { 0% {opacity:1;visibility:visible} 25%,100% {opacity:0;visibility:hidden} }
+@keyframes two { 0% {opacity:0;visibility:hidden} 25% {opacity:1;visibility:visible} 50%,100% {opacity:0;visibility:hidden} }
+@keyframes three { 0% {opacity:0;visibility:hidden} 50% {opacity:1;visibility:visible} 75%,100% {opacity:0;visibility:hidden} }
+@keyframes four { 0% {opacity:0;visibility:hidden} 75%,100% {opacity:1;visibility:visible} }
+details { margin:24px 0; } summary { cursor:pointer; } li { margin-bottom:12px; }
+@media(max-width:500px) { body {padding:20px 16px} .frame {padding:20px} .stage {min-height:440px} }
+@media(prefers-reduced-motion:reduce) {
+ .stage {min-height:0;} .frame, .frame:first-child {position:static;opacity:1;visibility:visible;border-bottom:1px solid #33425c;}
+ #play:checked ~ .stage .frame {animation:none;} #play,.control {display:none;}
+}
+</style>
+</head>
+<body>
+<p><img class="mark" src="../../../skills/orbitdiff/assets/orbitdiff-mark.svg" alt=""> <strong>OrbitDiff</strong></p>
+<p class="eyebrow">Synthetic illustration · v0.1.1 preview</p>
+<h1>Who did they follow?</h1>
+<p>A changed public handle. Dated observations. The rest stays unknown.</p>
+<input type="checkbox" id="play"><label class="control" for="play">Play 28-second example</label>
+<p class="foot">Uncheck to reset. Check again to replay. Reduced motion shows all four steps.</p>
+<div class="stage" aria-label="Synthetic four-step observation story">
+ <section class="frame f1"><span class="badge">1 / 4 · Baseline</span><h2>Start with a public list.</h2><p class="handle">atlas_studio</p><p>September 30 · 09:00 UTC</p><p>The first accepted complete observation is the starting point. No new-follow event.</p></section>
+ <section class="frame f2"><span class="badge pending">2 / 4 · Pending</span><h2>A handle appears.</h2><p class="handle">pixel_forge</p><div class="dates"><p><strong>First observed</strong>October 1 · 09:00 UTC</p></div><p>One changed observation. Awaiting another agreeing complete observation.</p></section>
+ <section class="frame f3"><span class="badge confirmed">3 / 4 · Confirmed addition</span><h2>Another observation agrees.</h2><p class="handle">pixel_forge</p><div class="dates"><p><strong>First observed</strong>October 1 · 09:00 UTC</p><p><strong>Confirmed</strong>October 2 · 09:00 UTC</p></div><p>Observation dates, not exact Follow action times.</p></section>
+ <section class="frame f4"><span class="badge gap">4 / 4 · Evidence gap</span><h2>Incomplete does not mean unchanged.</h2><p>October 3's check is incomplete. October 2's evidence is retained.</p><p>No new conclusion is available.</p><p><strong>Try the offline demo with your agent.</strong></p></section>
+</div>
+<p class="foot">Illustration, not a live report or app screen. Whole rosters need not match to confirm a relationship change. Accepted complete uses provider-finished validation including at least 95% of the reported count; exact coverage is not guaranteed.</p>
+<p>Demo prerequisites: Python 3.11+, Git, pipx and terminal access. No Instagram login for the demo. v0.1.1 has no built-in daily alerts.</p>
+<p><a href="../../prompt.md">Try the offline demo with your agent</a> · <a href="walkthrough.md">Accessible transcript</a></p>
+<details open><summary>Read the whole example</summary><ol>
+<li>September 30 baseline: atlas_studio's public following list is the starting point. No event.</li>
+<li>October 1: pixel_forge first appears, pending.</li>
+<li>October 2: another accepted complete observation agrees on the addition. Confirmed. Both dates are observation dates.</li>
+<li>October 3: incomplete check. Existing evidence remains, with no new conclusion.</li>
+</ol></details>
+</body>
+</html>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+<title id="title">Synthetic confirmed public-following addition</title><desc id="desc">atlas_studio's fictional observation history: pixel_forge first observed October 1 at 09:00 UTC, confirmed October 2 at 09:00 UTC. Observation times, not exact Follow action times.</desc>
+<rect width="1200" height="640" rx="24" fill="#0c1220"/>
+<g font-family="system-ui, sans-serif" fill="#eef3ff">
+<g transform="translate(64 46) scale(.5)"><rect width="128" height="128" rx="28" fill="#111827"/><circle cx="64" cy="64" r="34" fill="none" stroke="#60a5fa" stroke-width="10"/><circle cx="91" cy="47" r="9" fill="#fbbf24"/><path d="M31 81c12 10 31 13 49 4" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round"/></g><text x="146" y="88" font-size="30" font-weight="650">OrbitDiff</text>
+<text x="64" y="146" font-size="22" fill="#a6b6d0">SYNTHETIC EXAMPLE · PUBLIC FOLLOWING</text>
+<rect x="64" y="182" width="1072" height="342" rx="20" fill="#111b2f" stroke="#33425c"/>
+<text x="96" y="234" font-size="24" fill="#69e8b6">Confirmed addition in atlas_studio's observations</text>
+<text x="96" y="310" font-size="56" font-weight="700">pixel_forge</text>
+<text x="96" y="364" font-size="22" fill="#a6b6d0">First observed</text><text x="96" y="407" font-size="30">October 1 · 09:00 UTC</text>
+<text x="648" y="364" font-size="22" fill="#a6b6d0">Confirmed</text><text x="648" y="407" font-size="30">October 2 · 09:00 UTC</text>
+<text x="96" y="478" font-size="24">Observation times, not exact Follow action times.</text>
+<text x="64" y="572" font-size="25">Try the offline demo with your agent.</text>
+<text x="64" y="612" font-size="21" fill="#a6b6d0">Illustration · v0.1.1 preview · no built-in daily alerts</text>
+</g></svg>

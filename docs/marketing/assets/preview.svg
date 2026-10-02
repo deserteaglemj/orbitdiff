@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+<title id="title">Who did they follow? OrbitDiff preview</title><desc id="desc">Original synthetic design master. OrbitDiff public following observations, an offline demo with agent, and observation dates instead of exact Follow action times.</desc>
+<rect width="1280" height="640" rx="24" fill="#0c1220"/>
+<g font-family="system-ui, sans-serif" fill="#eef3ff">
+<g transform="translate(64 46) scale(.5)"><rect width="128" height="128" rx="28" fill="#111827"/><circle cx="64" cy="64" r="34" fill="none" stroke="#60a5fa" stroke-width="10"/><circle cx="91" cy="47" r="9" fill="#fbbf24"/><path d="M31 81c12 10 31 13 49 4" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round"/></g><text x="146" y="88" font-size="30" font-weight="650">OrbitDiff</text>
+<text x="64" y="160" font-size="22" fill="#a6b6d0">PUBLIC FOLLOWING OBSERVATIONS</text>
+<text x="64" y="250" font-size="66" font-weight="750">Who did</text><text x="64" y="327" font-size="66" font-weight="750">they follow?</text>
+<text x="64" y="396" font-size="27">A changed handle. Dated evidence.</text>
+<text x="64" y="474" font-size="27" fill="#92c8ff">Try the offline demo with your agent.</text>
+<rect x="742" y="172" width="470" height="325" rx="22" fill="#111b2f" stroke="#33425c"/>
+<text x="772" y="218" font-size="21" fill="#69e8b6">SYNTHETIC · CONFIRMED</text>
+<text x="772" y="285" font-size="39" font-weight="700">pixel_forge</text>
+<text x="772" y="334" font-size="22">atlas_studio's public list</text>
+<text x="772" y="384" font-size="22">First observed: October 1</text>
+<text x="772" y="423" font-size="22">Confirmed: October 2</text>
+<text x="772" y="467" font-size="20" fill="#a6b6d0">Observation dates, not action times.</text>
+<text x="64" y="555" font-size="22" fill="#a6b6d0">Python 3.11+ · Git · pipx · terminal access · no demo login</text>
+<text x="64" y="597" font-size="22" fill="#a6b6d0">v0.1.1 preview · no built-in daily alerts · original illustration</text>
+</g></svg>
