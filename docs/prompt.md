@@ -1,122 +1,89 @@
-# Copy-paste prompt: set up OrbitDiff with any AI agent
+# Try OrbitDiff with your agent
 
-Paste the block below into Claude, Codex, GitHub Copilot, Cursor, Gemini CLI, OpenCode, or any other coding agent. It walks the agent through install, verification, and your first tracked target.
+For a local coding agent that can run terminal commands. Python 3.11+, Git and pipx are prerequisites for the pinned runtime route. Named host placement is not a compatibility guarantee. The skill instructs; the runtime commands.
+
+Paste the block below. It finishes with an offline receipt before offering live use.
 
 ```text
-You are setting up OrbitDiff for me, a first-time user.
+Role: Set up the OrbitDiff v0.1.1 offline preview for a first-time user.
+Task: Complete an isolated offline demo, then explain the result.
 
-OrbitDiff is a local-first CLI that tracks confirmed changes in public
-Instagram following lists. It stores a small SQLite database on this
-machine. It never asks for an Instagram password or verification code, and
-it refuses private profiles.
+1. Inspect existing tools and project rules. Check Python 3.11+, Git,
+   pipx and orbitdiff --help. Record which executable would run. Preserve
+   an existing installation; if its version or origin is uncertain,
+   report that instead of treating command help as release proof.
+   If a prerequisite is missing, give the platform's setup instructions
+   and record the block. Install prerequisites only with user authority.
 
-Do these steps in order:
-
-1. Check whether I already have it:
-
-   orbitdiff --help
-
-   If that works, skip to step 4.
-
-2. Install it with pipx. If pipx is missing, install pipx first with your
-   package manager (for example: brew install pipx, or pipx install
-   instructions for my platform), then run:
-
+2. If OrbitDiff is absent and installation is authorized, run:
    pipx install git+https://github.com/deserteaglemj/orbitdiff.git@v0.1.1
+   Do not overwrite an existing runtime or upgrade it silently.
 
-3. Prove the install works without touching Instagram:
+3. Run orbitdiff --help. For storage checks, choose a fresh scratch
+   directory and run orbitdiff doctor --data-dir SCRATCH_PATH.
+   Doctor initializes local storage; it does not test login or Instagram.
+   Run orbitdiff demo. It uses synthetic accounts and a temporary database.
+   Expected output: baseline stored; pending changes observed; then
+   following_stopped nova_labs (200) confirmed
+   following_started ember_lab (300) confirmed
+   The trailing confirmation timestamp varies per run.
+   A failure ends this route with the error and a concrete next step.
+   Do not repeat a failing command without identifying its cause.
 
-   orbitdiff --help
-   orbitdiff doctor
+4. Explain the demo: baseline is silent, a change is pending until two
+   accepted complete observations agree on that relationship change,
+   and the resulting times are observation times, not Follow action times.
+   This accelerated example proves offline execution only.
+   OrbitDiff stores its history locally. The chosen AI host handles any
+   output shared with it under that host's own settings.
 
-4. Run the offline demo. It uses synthetic accounts and no network:
+5. Return a receipt: outcome; executable; runtime identity if verified;
+   commands and results; scratch path; Pass/Fail/Unproven for install,
+   offline execution and host discovery. Mark live collection, scheduling
+   and notifications Unproven unless separate evidence actually exists.
+   Finish here unless the user explicitly chooses the live route.
 
-   orbitdiff demo
+Optional live route, only after a separate opt-in:
+- Read this skill's authentication and safety references when available.
+  Never ask me for my Instagram password, verification codes, cookies or
+  session contents. The human creates the local session in their own
+  terminal. If Instaloader's CLI is absent, offer pipx install instaloader
+  for human-approved installation, then show the human:
+  instaloader --login MY_INSTAGRAM_USERNAME
+  Credentials go directly to Instaloader, never to you.
+- Ask: "Which public Instagram username do you want to track first?"
+  Wait for a target-specific answer and the human's login-reference name.
+  Accept @handle or an instagram.com profile URL; ignore the query string, fragment, and any trailing slash. Require a single plausible profile
+  path segment. Validate and quote inputs as arguments, never shell code.
+- If a target turns out to be private, stop; request a different public
+  target. Do not infer access from the human's ability to view it.
+- Choose the intended local data directory explicitly and retain it for
+  each command. Use init only for a target not already initialized:
+  orbitdiff init TARGET --login LOGIN --data-dir DATA_PATH
+  Success prints nothing. A baseline is not a batch of follow events.
+- Wait at least 30 minutes after every live attempt, including baseline
+  and failure. This release's runtime cooldown covers successful scans
+  only; do not rely on it for failed or concurrent attempts.
+  Later, with authority to collect:
+  orbitdiff scan TARGET --login LOGIN --data-dir DATA_PATH
+  orbitdiff status TARGET --json --data-dir DATA_PATH
+  orbitdiff report TARGET --format markdown --data-dir DATA_PATH
+- Preserve evidence after failed or incomplete observations. Stop on
+  session, challenge, rate-limit, private-target or completeness problems
+  and have the human resolve the issue before another attempt.
+- A provider-finished list passing the >=95% reported-count threshold is
+  accepted as complete in v0.1.1; exact roster coverage is not guaranteed.
+  There is no explicit collection request/time bound in this release.
+- History begins at baseline; brief changes between observations can be
+  missed. Read reports as facts, with motives and relationship judgments
+  unknown. Status confirmed_count is a relationship count, not event count.
+- Scheduling is a separate approved setup using an existing local host.
+  v0.1.1 has no built-in daily alerts. Installation and a manual scan do
+  not prove unattended operation or notification delivery.
 
-   Confirm the output shows a baseline line, a pending line, and these
-   two confirmed events (the trailing confirmation timestamp varies per
-   run because it is a real date-time):
-
-   a line starting: following_stopped nova_labs (200) confirmed
-   a line starting: following_started ember_lab (300) confirmed
-   If anything else fails, fix it before continuing.
-
-5. Explain in 3 or 4 sentences what OrbitDiff does and does not do:
-
-   Does: watch the following list of any PUBLIC Instagram account, store
-   changes locally, and confirm a change only after two matching complete
-   scans.
-   Does not: view private profiles, send DMs, follow or unfollow anyone,
-   scrape posts or stories, or upload my data anywhere.
-
-6. Live tracking needs a one-time Instagram session file that only I can
-   create. Do not ask me for my password, a login code, cookies, or any
-   session text. Instead, give me exactly these commands to run myself,
-   one at a time, and wait for me to confirm each one:
-
-   a) Install Instaloader in my terminal:
-
-      pipx install instaloader
-
-   b) Log in once, interactively, in my own terminal. I will type my own
-      username and password directly to Instaloader, never to you:
-
-      instaloader --login MY_INSTAGRAM_USERNAME
-
-      (Tell me to replace MY_INSTAGRAM_USERNAME with my handle. After
-      login, Instaloader saves a session file on this machine and I can
-      delete it whenever I want.)
-
-7. Ask me: "Which public Instagram username do you want to track first?"
-   Wait for my answer. If the name I give starts with @, strip the @. If
-   I give a full profile URL instead, take only the profile-name part of
-   the path: ignore the query string, fragment, and any trailing slash,
-   and use the last non-empty path segment (for example
-   https://www.instagram.com/someone/ becomes someone). If the value I
-   gave is not a plausible public username, ask me to confirm it before
-   running any live command.
-
-8. Create the silent baseline for my target (replace TARGET with my
-   answer and LOGIN with the username I logged in with in step 6):
-
-   orbitdiff init TARGET --login LOGIN
-
-   Baselines print nothing when they succeed.
-
-9. Run the first comparison scan at least 30 minutes later (OrbitDiff
-   enforces a 30-minute cooldown between live scans):
-
-   orbitdiff scan TARGET --login LOGIN
-
-10. Show me the results:
-
-   orbitdiff status TARGET
-   orbitdiff report TARGET
-
-11. Close by offering either of these:
-   - Schedule scans (a cron job or scheduled task running the scan
-     command daily), with my confirmation before creating anything.
-   - Install the OrbitDiff Agent Skill so you can operate it for me in
-     future sessions:
-
-     gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --scope user
-
-Rules for you:
-- Never ask me for my Instagram password, two-factor code, cookies, or
-  session file contents.
-- Never run instaloader --login yourself or handle my credentials.
-- If a target turns out to be private, tell me OrbitDiff cannot track it
-  and ask for a different public target.
-- If any command fails, show me the error and fix the cause before
-  moving on. Do not skip the demo check.
-- Track exactly one target until I ask for more.
+Optional skill placement, only for the host and scope the user selects:
+  gh skill install deserteaglemj/orbitdiff orbitdiff --pin v0.1.1 --agent codex --scope project
+Use gh skill install --help for other host names. Preserve existing skills.
+An install pins the published skill, not this local candidate's edits.
+Verify actual host discovery separately; do not claim it from copied files.
 ```
-
-After the final step, every later check is just:
-
-```bash
-orbitdiff scan TARGET --login LOGIN
-orbitdiff report TARGET
-```
-
-Run scans at least 30 minutes apart, and treat a change as real only after two scans agree.
