@@ -53,13 +53,13 @@ Account/consent-based channel and recipients: not selected.
 
 **Welcome subject:** Try the OrbitDiff offline preview
 
-**Welcome body:** "Thanks for choosing to try OrbitDiff. Start with a fictional public-following example before any Instagram login. The demo needs Python 3.11+, Git, pipx and terminal access. It shows a baseline, a pending change and later confirmation. The dates are observations, not exact action times. This v0.1.1 route has no built-in daily alerts. Setup: https://github.com/deserteaglemj/orbitdiff/blob/v0.1.1/docs/prompt.md . That link contains the published release's instructions; the revised candidate is not published yet. If you want help, share a redacted error, never session material. Reply only if you want further preview updates."
+**Welcome body:** "Thanks for choosing to try OrbitDiff. Start with a fictional public-following example before any Instagram login. The demo needs Python 3.11+, Git, pipx and terminal access. It shows a baseline, a pending change and later confirmation. The dates are observations, not exact action times. This v0.1.1 route has no built-in daily alerts. Revised setup: https://github.com/deserteaglemj/orbitdiff/blob/codex/marketing-public/docs/prompt.md . If you want help, share a redacted error, never session material. Reply only if you want further preview updates."
 
 **Requested setup help:** "Where did the offline demo stop: prerequisites, installation, finding the command or understanding the output? A redacted command/error is enough. Please keep account details and credentials private. We will explain the next step; nothing will collect live data without your separate opt-in."
 
 **Meaningful candidate update:** "The OrbitDiff marketing candidate now explains public scope, observation dates and incomplete checks before live setup. It does not add automatic daily alerts or change the runtime. The candidate is not published yet. If you opted into preview research, we can arrange a synthetic-only walkthrough after your consent."
 
-Before publishing revised setup, replace the candidate-link gap with the approved exact commit URL and re-read it. Never send an unpublished candidate as if a tag contains its text.
+The welcome's branch URL is a prepared destination, not a currently published guide. Send only after an approved push and visible readback of the revised prompt. If the final destination changes, update the exact draft and obtain approval for that text. Never send old tag instructions as if they contain the revised onboarding.
 
 ## Three short-form posts
 
