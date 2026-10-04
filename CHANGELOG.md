@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [0.2.3] - Unreleased
 
+- Fence late interrupted-worker failures, record one recovery after a known block, and reject expired delivery acknowledgements as uncertain.
+- Return structured errors for invalid alert identifiers and retain blocked collection status when a notification submits successfully.
+- Show portable daily-job states and observation/submission evidence in Orbit OS. Improve small-text contrast and add real local browser/accessibility journeys.
+- Add bounded generated regression tests for confirmation cycles, isolated notification chunks, and daily due times.
+- Reconcile marketing claims and consented research materials with candidate capabilities and separate live gates.
 - Add opt-in daily public-following jobs, transactional due windows, shared live cooldown and stale-worker fencing, recorded gaps, and pause/resume/removal commands.
 - Reconcile persisted confirmations into frozen notification digests with durable attempts, bounded retries, and explicit uncertain-submission resolution. The initial transport is macOS Notification Center.
 - Document Codex host registration separately from runtime configuration. Ordinary installation stays inactive, and live collection, native submission, and three actual daily windows require their own evidence.
