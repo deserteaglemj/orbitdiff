@@ -15,6 +15,7 @@ from orbitdiff.alert_delivery import MacOSSender
 from orbitdiff.alert_outbox import OutboxStore
 from orbitdiff.alerts import deliver_job, run_job
 from orbitdiff.paths import validate_local_path
+from orbitdiff.providers.base import InvalidTargetError
 from orbitdiff.providers.instaloader import InstaloaderProvider
 
 
@@ -149,7 +150,7 @@ def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
         result = _execute(args, datetime.now(UTC))
-    except ValueError as error:
+    except (ValueError, InvalidTargetError) as error:
         result = {"outcome": "blocked", "reason": str(error)}
     except (OSError, sqlite3.Error):
         result = {"outcome": "error", "reason": "local workspace could not be read or written safely"}

@@ -236,7 +236,24 @@ class AlertStore(GraphStore):
     def _finish_window(self, conn: sqlite3.Connection, window_id: str, *, state: str,
                        reason: str | None, now: datetime, block: bool) -> None:
         row = conn.execute("SELECT * FROM alert_windows WHERE id=?", (window_id,)).fetchone()
-        if row is None or row["state"] != "running":
+        if row is None:
+            return
+        if row["state"] == "interrupted" and block:
+            # The outer orchestration may replay a completion after explicit resume.
+            # Persist handling once, and fence it against newer manual admissions too.
+            if row["reason"] != "worker_interrupted":
+                return
+            target = self._job(conn, row["job_id"])["target"]
+            admission = conn.execute("SELECT attempted_at FROM live_attempts WHERE target=?", (target,)).fetchone()
+            if admission is None or admission[0] != row["claimed_at"]:
+                return
+            conn.execute("UPDATE alert_windows SET reason=? WHERE id=?", (reason, window_id))
+            changed = conn.execute("UPDATE alert_jobs SET state='blocked',blocked_reason=? WHERE id=? AND state='enabled'",
+                                   (reason, row["job_id"]))
+            if changed.rowcount:
+                self._on_window_finished(conn, dict(row), "failed", aware(now))
+            return
+        if row["state"] != "running":
             return
         conn.execute("UPDATE alert_windows SET state=?,reason=?,finished_at=? WHERE id=?",
                      (state, reason, aware(now).isoformat(), window_id))
@@ -253,7 +270,7 @@ class AlertStore(GraphStore):
         # A window and its reserved attempt share an exact UTC admission instant.
         # Manual calls use GraphStore; skipped reservations never reach this hook.
         row = connection.execute("""SELECT w.id FROM alert_windows w JOIN alert_jobs j ON j.id=w.job_id
-            WHERE j.target=? AND w.claimed_at=? AND w.state='running'""",
+            WHERE j.target=? AND w.claimed_at=? AND w.state IN ('running','interrupted')""",
             (target, aware(attempted_at).isoformat())).fetchone()
         if row is not None:
             self._finish_window(connection, row[0], state=state, reason=reason, now=now, block=state == "failed")

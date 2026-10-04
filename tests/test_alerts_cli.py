@@ -16,6 +16,36 @@ def invoke(args, path, capsys):
     return code,json.loads(output.out)
 
 
+@pytest.mark.parametrize(('target', 'login'), [
+    ('bad/target', 'orbit_demo'), ('atlas_studio', 'bad/login'),
+])
+def test_invalid_setup_identifiers_return_safe_blocked_receipt(tmp_path, capsys, monkeypatch, target, login):
+    import orbit_os.alerts_cli as cli
+
+    monkeypatch.setattr(cli, 'probe_runtime', lambda path: '0.2.3')
+    monkeypatch.setattr(cli.sys, 'platform', 'darwin')
+    code, result = invoke(['setup', target, '--login', login, '--runtime', sys.executable,
+                          '--at', '09:00', '--timezone', 'UTC', '--destination', 'current-user'],
+                         tmp_path, capsys)
+    assert code == 2 and result['outcome'] == 'blocked'
+    assert 'bad/' not in json.dumps(result)
+    assert not (tmp_path/'orbitdiff.sqlite3').exists()
+
+
+def test_invalid_updated_login_preserves_paused_job(tmp_path, capsys):
+    from orbitdiff.alert_outbox import OutboxStore
+
+    store = OutboxStore(tmp_path/'orbitdiff.sqlite3')
+    job = store.configure('atlas_studio', login='orbit_demo', runtime=Path(sys.executable).absolute(),
+                          time='09:00', timezone='UTC', now=datetime.now(UTC))
+    before = (tmp_path/'orbitdiff.sqlite3').read_bytes()
+    code, result = invoke(['update', job['id'], '--at', '10:00', '--timezone', 'UTC',
+                          '--login', 'bad/login'], tmp_path, capsys)
+    assert code == 2 and result['outcome'] == 'blocked'
+    assert 'bad/login' not in json.dumps(result)
+    assert (tmp_path/'orbitdiff.sqlite3').read_bytes() == before
+
+
 def test_missing_alert_status_and_dry_run_preserve_workspace(tmp_path,capsys):
     root = tmp_path/'absent'
     code,result = invoke(['status'],root,capsys)
