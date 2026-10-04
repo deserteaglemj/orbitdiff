@@ -232,3 +232,30 @@ def test_late_sender_cannot_report_success_after_lease_is_lost(tmp_path):
     receipts=dispatch(store,job,SuspendedSender(),now=NOW)
     assert receipts[0]['state']=='uncertain'
     assert store.notices(job)[0]['state']=='uncertain'
+
+
+@pytest.mark.parametrize('elapsed', [120, 121, 180])
+def test_expired_completion_records_uncertainty_without_another_worker(tmp_path, elapsed):
+    store, job = setup(tmp_path)
+    store.status_notice(job, identity='one', payload='Synthetic status', now=NOW)
+    notice = store.claim_notice(job, now=NOW, idempotent=False)
+    assert notice is not None
+    accepted = store.finish_notice(notice['id'], notice['lease_token'], state='accepted',
+                                   detail='submitted_to_macos', now=NOW+timedelta(seconds=elapsed))
+    assert accepted is False
+    persisted = store.notices(job)[0]
+    assert persisted['state'] == 'uncertain'
+    assert persisted['payload'] == notice['payload']
+    assert persisted['key'] == notice['key']
+    assert store.delivery_attempts(job)[0]['state'] == 'uncertain'
+    assert store.jobs()[0]['delivery_warning'] == 'submission_uncertain'
+    assert store.claim_notice(job, now=NOW+timedelta(days=1), idempotent=False) is None
+
+
+def test_completion_before_lease_expiry_retains_acceptance(tmp_path):
+    store, job = setup(tmp_path)
+    store.status_notice(job, identity='one', payload='Synthetic status', now=NOW)
+    notice = store.claim_notice(job, now=NOW, idempotent=False)
+    assert store.finish_notice(notice['id'], notice['lease_token'], state='accepted',
+                               detail='submitted_to_macos', now=NOW+timedelta(seconds=119))
+    assert store.notices(job)[0]['state'] == 'accepted'

@@ -52,7 +52,7 @@ def run_job(store: OutboxStore, job_id: str, *, now: datetime,
             delivery["outcome"] = "partial"
         elif delivery["outcome"] == "no_work":
             delivery["outcome"] = "success"
-    elif job["state"] == "blocked" and delivery["outcome"] == "no_work":
+    elif job["state"] == "blocked":
         delivery["outcome"] = "blocked"
         delivery["reason"] = job["blocked_reason"]
     return delivery

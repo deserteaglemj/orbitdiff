@@ -7,8 +7,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from hypothesis.configuration import set_hypothesis_home_dir
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
+set_hypothesis_home_dir(Path(__file__).parents[1] / ".orbit-local" / "hypothesis")
 
 
 @pytest.fixture

@@ -45,6 +45,8 @@ Record missing gates as Unproven. Synthetic time advancement and a merged PR do 
 
 ## Reporting and gates
 
+[0.2.3 candidate verification](verification-0.2.3.md) records the current local audit. Its offline passes leave live, host, notification, consumer trust and human-use gates separate.
+
 Use **Pass**, **Fail**, or **Unproven** for each applicable criterion in the version-specific verification document. A missing prerequisite is Unproven; an observed rejection or failure is Fail. Never convert offline fixture success into live evidence or a local launch into downloaded-app trust.
 
 For the skill, retain the scenario prompts, actual commands and outputs, independent grades, source-preservation results, and the packaged skill/runtime identities in ignored local evidence. State model-context reuse, shared evaluation guardrails, unavailable metrics, synthetic version fixtures, and the limits of the cohort. Passing a finite cohort does not establish universal agent compatibility.

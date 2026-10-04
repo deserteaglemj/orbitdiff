@@ -1,6 +1,6 @@
 # OrbitDiff product marketing context
 
-Updated 2026-09-30. Founder-directed positioning for an existing product, checked against source and the advertised v0.2.2 preview. Audience and conversion hypotheses have not been validated with customers.
+Updated 2026-10-03. Founder-directed positioning for an existing product. Published v0.2.2 and unreleased candidate 0.2.3 have different capabilities. Audience and conversion hypotheses have not been validated with customers.
 
 ## Product and audience
 
@@ -41,7 +41,7 @@ These are anticipated questions, not customer quotations:
 | Must I connect Instagram to try it? | The isolated demo and personal export imports need no Instagram login. |
 | Will it work with my agent? | Local files and command execution are prerequisites; consult measured host evidence before claiming compatibility. |
 | Will setup affect my existing history? | The demo is isolated. Use an explicit workspace for real work and preserve existing installations. |
-| Can it check every day? | A verified manual live workflow precedes an explicitly requested host schedule. There is no automatic schedule at installation, and this preview's live collection gate is Unproven. |
+| Can it check every day? | Candidate 0.2.3 implements opt-in Codex jobs and macOS notifications. Published v0.2.2 lacks those commands. Follow the scheduling reference after manual live verification and explicit activation; installation stays inactive. Actual daily operation remains Unproven. |
 
 Manual comparison and doing nothing are plausible alternatives. No comparative superiority, time saving, market demand, or switching behavior has been measured.
 
@@ -49,7 +49,7 @@ Manual comparison and doing nothing are plausible alternatives. No comparative s
 
 The current audit found no GitHub issues or discussions to analyze on 2026-09-30. There are no supplied customer interviews or pilot results. Do not invent personas, testimonials, adoption figures, conversion lifts, or retention claims.
 
-Use [installation evidence](../docs/skill-installation-verification.md) and the [audit record](../docs/github-usability-audit.md) for observed results and their limits. A demo proves its synthetic workflow only.
+Use [installation evidence](../docs/skill-installation-verification.md) and the [audit record](../docs/github-usability-audit.md) for observed results and their limits. A demo proves its synthetic workflow only. Before preparing public claims or recruiting a study, use the current [claim ledger](../docs/marketing/claim-ledger.md) and [pilot](../docs/marketing/pilot.md).
 
 ## Goal and next action
 

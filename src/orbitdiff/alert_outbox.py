@@ -84,9 +84,11 @@ class OutboxStore(AlertStore):
                        "Automatic collection is blocked. Open alert status for the next step.")
         elif state == "success":
             previous = conn.execute("""SELECT state FROM alert_windows WHERE job_id=? AND id!=?
-                AND state IN ('success','failed') ORDER BY due_at DESC LIMIT 1""",
+                AND (state IN ('success','failed') OR
+                     (state='interrupted' AND reason IS NOT NULL AND reason!='worker_interrupted'))
+                ORDER BY due_at DESC LIMIT 1""",
                 (job["id"], window["id"])).fetchone()
-            if previous is None or previous[0] != "failed":
+            if previous is None or previous[0] == "success":
                 return
             identity = f"recovered:{window['id']}"
             payload = (f"OrbitDiff completed a new observation for {job['target']}. "
@@ -216,6 +218,14 @@ class OutboxStore(AlertStore):
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute("SELECT * FROM alert_notices WHERE id=? AND lease_token=? AND state='sending'", (notice_id,token)).fetchone()
                 if row is None:
+                    return False
+                if datetime.fromisoformat(row["lease_until"]) <= current:
+                    conn.execute("UPDATE alert_notices SET state='uncertain',detail='submission_uncertain' WHERE id=?",
+                                 (notice_id,))
+                    conn.execute("UPDATE alert_delivery_attempts SET state='uncertain',detail='lease_expired',finished_at=? WHERE token=?",
+                                 (current.isoformat(), token))
+                    conn.execute("UPDATE alert_subscriptions SET warning='submission_uncertain',recovery_pending=1 WHERE id=?",
+                                 (row["sub_id"],))
                     return False
                 conn.execute("UPDATE alert_notices SET state=?,detail=?,next_attempt=? WHERE id=?",
                              (state,detail,(current+timedelta(minutes=30)).isoformat(),notice_id))

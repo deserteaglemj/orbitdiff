@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,46 @@ def evaluate(expression: str) -> object:
         timeout=10,
     )
     return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize('state', ['paused', 'enabled', 'blocked'])
+def test_system_renders_real_daily_job_status(tmp_path, state):
+    from orbitdiff.alert_outbox import OutboxStore
+    from orbitdiff.models import Collection
+
+    now = datetime(2026, 10, 1, 8, tzinfo=UTC)
+    store = OutboxStore(tmp_path/'orbitdiff.sqlite3')
+    store.apply_collection(Collection('atlas_studio', 0, (), True, now-timedelta(days=1)))
+    job = store.configure('atlas_studio', login='orbit_demo', runtime=Path(sys.executable).absolute(),
+                          time='09:00', timezone='UTC', now=now)
+    if state != 'paused':
+        store.bind(job['id'], 'synthetic-host')
+        store.enable(job['id'], now=now)
+        window = store.claim_window(job['id'], now=now+timedelta(hours=1))
+        store.finish_window(window['id'], state='failed' if state == 'blocked' else 'success',
+                            reason='session_unavailable' if state == 'blocked' else None,
+                            now=now+timedelta(hours=1), block=state == 'blocked')
+    data = {'schedules': store.jobs(now=now+timedelta(hours=2)), 'workspace': {'mode': 'portable'}}
+    expression = f"vm.runInContext({json.dumps('ui.data = '+json.dumps(data)+'; systemView()')}, context)"
+    rendered = evaluate(expression)
+    assert isinstance(rendered, str)
+    assert '@atlas_studio' in rendered
+    assert '09:00' in rendered and 'UTC' in rendered
+    assert state.capitalize() in rendered
+    assert 'Last complete observation' in rendered
+    assert 'Notifications' in rendered
+    assert 'orbit_demo' not in rendered
+    if state == 'blocked':
+        assert 'session_unavailable' in rendered
+
+
+def test_system_keeps_legacy_schedule_evidence():
+    data = {'schedules': [{'name': 'Synthetic legacy tracker', 'enabled': False,
+                           'schedule': '0 9 * * *', 'last_status': 'success'}]}
+    rendered = evaluate(f"vm.runInContext({json.dumps('ui.data = '+json.dumps(data)+'; systemView()')}, context)")
+    assert 'Synthetic legacy tracker' in rendered
+    assert '0 9 * * *' in rendered
+    assert 'Paused' in rendered
 
 
 def test_profile_links_accept_only_instagram_usernames() -> None:
