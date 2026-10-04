@@ -1,0 +1,52 @@
+name: OrbitDiff Web jobs
+
+# Drains OrbitDiff Web background jobs: processing stored owner-export imports
+# and daily reviews of stored evidence. These jobs never contact Instagram.
+#
+# The schedule is the hourly tick for the hosted app. It replaces a Vercel cron,
+# which can run at most once per day on the Hobby plan. Scheduled runs start only
+# from the default branch. The endpoint is idempotent, drains a bounded batch,
+# and skips paused profiles and deleted or suspended accounts.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+  push:
+    paths:
+      - ".github/workflows/orbitdiff-web-jobs.yml"
+
+permissions: {}
+
+concurrency:
+  group: orbitdiff-web-jobs
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Drain a bounded batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the protected batch endpoint
+        env:
+          JOBS_URL: ${{ secrets.ORBITDIFF_WEB_JOBS_URL }}
+          JOBS_SECRET: ${{ secrets.ORBITDIFF_WEB_JOBS_SECRET }}
+        run: |
+          if [ -z "${JOBS_URL}" ] || [ -z "${JOBS_SECRET}" ]; then
+            echo "::warning::OrbitDiff Web jobs are not configured. Set the ORBITDIFF_WEB_JOBS_URL and ORBITDIFF_WEB_JOBS_SECRET repository secrets. Nothing was run."
+            exit 0
+          fi
+          status="$(curl --silent --show-error \
+            --output response.json --write-out "%{http_code}" \
+            --max-time 120 --retry 2 --retry-delay 15 \
+            --request POST \
+            --header "Authorization: Bearer ${JOBS_SECRET}" \
+            --header "Content-Type: application/json" \
+            --data "{}" \
+            "${JOBS_URL}")"
+          echo "HTTP ${status}"
+          # The response holds counts only, never account data.
+          cat response.json
+          echo
+          test "${status}" = "200"
