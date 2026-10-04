@@ -98,7 +98,16 @@ async function main() {
     await audit('malformed-import');
     await page.locator('[data-view="relationships"]').click();
     await page.getByText('@nova_labs', { exact: true }).first().waitFor();
-    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await page.setViewportSize({ width: 390, height: 900 });
+    const enlarged = await page.evaluate(() => {
+      const heading = document.querySelector('h1');
+      const before = parseFloat(getComputedStyle(heading).fontSize);
+      const sizes = [...document.querySelectorAll('body *')].filter(el => el instanceof HTMLElement)
+        .map(el => [el, parseFloat(getComputedStyle(el).fontSize)]);
+      for (const [el, size] of sizes) el.style.fontSize = (size * 2) + 'px';
+      return { before, after: parseFloat(getComputedStyle(heading).fontSize) };
+    });
+    assert.equal(enlarged.after, enlarged.before * 2);
     await audit('text-zoom');
     assert.deepEqual(forbidden, [], 'No external requests or live scan attempts');
     assert.deepEqual(receipt.errors, [], 'No browser runtime errors');
@@ -106,6 +115,7 @@ async function main() {
       'Accessibility violations in rendered states');
     receipt.outcome = 'success';
     receipt.keyboard = 'skip link and search focus checked; human screen-reader unproven';
+    receipt.text_enlargement = 'computed text sizes doubled at 390px; human browser zoom unproven';
   } finally {
     await fs.writeFile(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2));
     await browser.close();

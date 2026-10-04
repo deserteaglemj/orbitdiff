@@ -8,7 +8,7 @@ October 3, 2026. Outcome: **partial**. Selectively adapted useful voice, claims 
 | Complete observations, all-attempt cooldown, candidate daily capability | Linked to current canonical references |
 | Comprehension/setup instruments | Prepared, version 2; zero participants |
 | Actual synthetic app screenshots | Prepared and locally reviewed; publication pending |
-| Draft demonstration recording | Preparation only; reception and publication unproven |
+| Current synthetic demonstration recording and transcript | Prepared and locally reviewed; reception and publication unproven |
 | Audience fit, useful outcome, pricing, conversion lift | Unproven |
 | Outreach, selected marketing asset upload and launch | Await exact content/destination approval |
 
