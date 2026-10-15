@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -203,6 +204,54 @@ def _copy_source_file(source: Path, destination: Path, version: _FileVersion) ->
                 raise _SourceChanged("source contents changed")
 
 
+def _digest_regular_file(path: Path, *, expected_size: int) -> bytes:
+    """Hash a regular file without following links; size must stay expected_size."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("non-following source reads are unavailable")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError as error:
+        raise _SourceChanged("source disappeared") from error
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as reader:
+        status = os.fstat(reader.fileno())
+        if not stat.S_ISREG(status.st_mode):
+            raise OSError("source is not a regular file")
+        if status.st_size != expected_size:
+            raise _SourceChanged("source size changed")
+        remaining = expected_size
+        while remaining:
+            chunk = reader.read(min(1024 * 1024, remaining))
+            if not chunk:
+                raise _SourceChanged("source was truncated")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if reader.read(1):
+            raise _SourceChanged("source grew while reading")
+    return digest.digest()
+
+
+def _snapshot_digests_match(
+    versions: dict[Path, _FileVersion | None], private: Path,
+) -> bool:
+    """True when each copied source still matches its private snapshot bytes."""
+    for source, version in versions.items():
+        if version is None:
+            continue
+        expected = version[3]
+        try:
+            source_digest = _digest_regular_file(source, expected_size=expected)
+            private_digest = _digest_regular_file(
+                private / source.name, expected_size=expected,
+            )
+        except _SourceChanged:
+            return False
+        if source_digest != private_digest:
+            return False
+    return True
+
+
 @contextmanager
 def _snapshot_connection(home: Path, database: Path) -> Iterator[sqlite3.Connection]:
     """Open SQLite only on a private stable copy, including committed WAL frames."""
@@ -215,7 +264,12 @@ def _snapshot_connection(home: Path, database: Path) -> Iterator[sqlite3.Connect
                 for source, version in before.items():
                     if version is not None:
                         _copy_source_file(source, private / source.name, version)
-                if _snapshot_versions(home, database) != before:
+                # Metadata timestamps can share a coarse tick on some hosts, so
+                # also require the copied bytes to still match the live sources.
+                if (
+                    _snapshot_versions(home, database) != before
+                    or not _snapshot_digests_match(before, private)
+                ):
                     raise _SourceChanged("source changed while copying")
             except _SourceChanged:
                 if attempt == 2:
