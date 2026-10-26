@@ -6,7 +6,7 @@ instaloader==4.15.3
 platformdirs==4.12.2
 altgraph==0.17.5
 bottle==0.13.4
-certifi==2026.7.22
+certifi==2026.10.19
 charset-normalizer==3.5.1
 idna==3.20
 macholib==1.16.4
