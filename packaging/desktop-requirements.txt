@@ -19,6 +19,6 @@ pyobjc-framework-Security==12.2.2
 pyobjc-framework-UniformTypeIdentifiers == 12.2.2
 pyobjc-framework-WebKit==12.2.2
 requests==2.34.2
-setuptools==84.0.0
+setuptools==84.1.0
 typing-extensions==4.16.0
 urllib3==2.8.0
